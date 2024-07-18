@@ -16,6 +16,25 @@ import pandas as pd
 ##################################################################
 
 
+import shutil
+
+
+####################################
+## empty the indicated folder
+def clear_folder(folder):
+# folder = '/path/to/folder'
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
+
+#######################################################################
+
 ripspath = './ripsdgm'
 reddenpath = './red_ripsdgm'
 if not os.path.exists(reddenpath):
@@ -23,6 +42,7 @@ if not os.path.exists(reddenpath):
   print("Folder %s created!" % reddenpath)
 else:
   print("Folder %s already exists" % reddenpath)
+  clear_folder(reddenpath)
 
 dendfiles = os.listdir(ripspath)
 
@@ -57,7 +77,3 @@ for dend in dendfiles:
     diagram_df = pd.DataFrame(red_dendogram)
     diagram_df.to_csv(reddenpath+'/'+dend,header = None,index = None)
     
-
-
-
-
