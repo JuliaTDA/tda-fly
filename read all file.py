@@ -54,13 +54,14 @@ def mkfolder(newpath):
         clear_folder(newpath)
         
 
-path_names = glob.glob('images/*.jpg')
+# path_names = glob.glob('images/*.jpg')
 
 
 # print(path_names)
 
 
-# pathname = 'C:/Users/SergioNote/OneDrive/Desktop/Relearn Python/arquivos resgatados/Wings 2/preset dendogram'
+# pathname = 'C:/Users/SergioNote/OneDrive/Desktop/Relearn Python/
+# arquivos resgatados/Wings 2/preset dendogram'
 # path = "C:/Users/SergioNote/OneDrive/Desktop/Relearn Python\
 # arquivos resgatados/Wings 2/preset dendogram"
 
@@ -96,14 +97,9 @@ newpath = './greyscale'
 # os.mkdir(path)
 
 # check whether directory already exists BEFORE trying to create file
-if not os.path.exists(newpath):
-  os.mkdir(newpath)
-  print("Folder %s created!" % newpath)
-else:
-  print("Folder %s already exists" % newpath)
-  clear_folder(newpath)
 
 
+mkfolder(newpath)
 
 
 
@@ -141,16 +137,10 @@ for file in files:
         p = pathlib.Path(messygray)
         file2= p.with_name(p.name.split('.')[0]).with_suffix('.png')
         cv2.imwrite(os.path.join(newpath, file2), img)
-        # cv2.imwrite('messygray.png', img)
-        #cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        #cv2.imshow('image',img)
-        #cv2.waitKey(0)
-        #cv2.destroyAllWindows()
-        #
 
-        # =============================================================================
+        # =====================================================================
         # Load an color image in grayscale and (optional) saves a copy
-        # =============================================================================
+        # =====================================================================
         #img = cv2.imread('euphylidorea_meigenii_limoniidae.jpg',0)
         # cv2.imshow('image',img)
         # k = cv2.waitKey(0)  & 0xFF
@@ -188,12 +178,14 @@ for file in grayfiles:
 
 
 binpath = './binaryimages'
-if not os.path.exists(binpath):
-  os.mkdir(binpath)
-  print("Folder %s created!" % binpath)
-else:
-  print("Folder %s already exists" % binpath)
-  clear_folder(binpath)
+
+mkfolder(binpath)
+# if not os.path.exists(binpath):
+#   os.mkdir(binpath)
+#   print("Folder %s created!" % binpath)
+# else:
+#   print("Folder %s already exists" % binpath)
+#   clear_folder(binpath)
 
 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(4,4))
 
@@ -202,7 +194,7 @@ for image in grayfiles:
     if image.endswith('.png'):
         img_path = graypath +'/' +image
         img = cv2.imread(img_path,0)
-        erosion = cv2.erode(img,kernel,iterations = 2)
+        # erosion = cv2.erode(img,kernel,iterations = 2)
         # blur = cv2.GaussianBlur(img,(5,5),0)
         blur = img
         ret3,th3 = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
@@ -229,12 +221,13 @@ for image in grayfiles:
 
 
 csvpath = './csvfles'
-if not os.path.exists(csvpath):
-  os.mkdir(csvpath)
-  print("Folder %s created!" % csvpath)
-else:
-  print("Folder %s already exists" % csvpath)
-  clear_folder(csvpath)
+mkfolder(csvpath)
+# if not os.path.exists(csvpath):
+#   os.mkdir(csvpath)
+#   print("Folder %s created!" % csvpath)
+# else:
+#   print("Folder %s already exists" % csvpath)
+#   clear_folder(csvpath)
 
 binfiles = os.listdir(binpath)
 
@@ -293,12 +286,13 @@ for image in binfiles:
 samplesize = 2000
 
 samplepath = './samples'
-if not os.path.exists(samplepath):
-  os.mkdir(samplepath)
-  print("Folder %s created!" % samplepath)
-else:
-  print("Folder %s already exists" % samplepath)
-  clear_folder(samplepath)
+mkfolder(samplepath)
+# if not os.path.exists(samplepath):
+#   os.mkdir(samplepath)
+#   print("Folder %s created!" % samplepath)
+# else:
+#   print("Folder %s already exists" % samplepath)
+#   clear_folder(samplepath)
 
 csvfiles = os.listdir(csvpath)
 
@@ -332,12 +326,13 @@ for csvfile in csvfiles:
 ##  diagrams
 
 ripspath = './ripsdgm'
-if not os.path.exists(ripspath):
-  os.mkdir(ripspath)
-  print("Folder %s created!" % ripspath)
-else:
-  print("Folder %s already exists" % ripspath)
-  clear_folder(ripspath)
+mkfolder(ripspath)
+# if not os.path.exists(ripspath):
+#   os.mkdir(ripspath)
+#   print("Folder %s created!" % ripspath)
+# else:
+#   print("Folder %s already exists" % ripspath)
+#   clear_folder(ripspath)
   
 samplefiles = os.listdir(samplepath)
 # rips = Rips()
