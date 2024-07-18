@@ -52,9 +52,10 @@ dendfiles = os.listdir(ripspath)
 # 3 - remove said intervals
 ###########################################
 
+## cut parameter
+cparm = 5
 
-
-def thin_den(dendogram):
+def thin_den(dendogram, cparm):
     rip_list = []
     for n in range(len(dendogram)):
         # print(n)
@@ -62,7 +63,7 @@ def thin_den(dendogram):
         comp = dendogram[n][1]-dendogram[n][0]
         # print(n, comp)
         ## comp >5 seens to be the ideal
-        if comp> 5:          ##### parametro ajustavel aqui ######
+        if comp> cparm:          ##### parametro ajustavel aqui ######
             rip_list.append(dendogram[n])
     red_dendogram = np.array(rip_list)      
     print(len(dendogram), len(red_dendogram))      
@@ -73,7 +74,7 @@ def thin_den(dendogram):
 for dend in dendfiles:
     data1=pd.read_csv(ripspath+'/'+dend)
     dendogram=np.array(data1)
-    red_dendogram = thin_den(dendogram)
+    red_dendogram = thin_den(dendogram,cparm)
     diagram_df = pd.DataFrame(red_dendogram)
     diagram_df.to_csv(reddenpath+'/'+dend,header = None,index = None)
     
