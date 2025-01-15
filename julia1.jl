@@ -345,7 +345,7 @@ for sdata in samplefiles
     # a = a+1
     # println(global a)
     # diagram = rips.fit_transform(data)
-    diagram = ripserer(datas;alg=:homology)#["dgms"][1] #create H1 diagram
+    diagram = ripserer(datas)#;alg=:homology["dgms"][1] #create H1 diagram
     println(typeof(diagram))
     println(size(diagram))
     println(length(diagram))
