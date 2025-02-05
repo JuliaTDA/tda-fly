@@ -4,14 +4,14 @@
 using PyCall
 
 @pyimport PIL.Image as Image 
-@pyimport PIL.ImageOps as ImageOps 
+@pyimport PIL.ImageOps as ImageOps
 # shutil = pyimport("shutil")
 os = pyimport("os")
 np = pyimport("numpy")
 cv2 = pyimport("cv2")
-using Printf
-using NumPyArrays
 using MatrixNetworks
+using NumPyArrays
+using Printf
 
 ####################################
 ## empty the indicated folder
@@ -52,7 +52,7 @@ function mkfolder(newpath)
 end
 
 # using OpenCV
-using Images
+# using Images
 
 # Trim Whitespace Section
 function trim_whitespace_image(image)

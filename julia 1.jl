@@ -19,7 +19,7 @@ import Glob as glob
 # import cv2
 @pyimport pathlib
 # import numpy as np
-@pyimport matplotlib.pyplot as plt
+
 @pyimport matplotlib.image as matimg
 @pyimport pandas as pd
 @pyimport random
@@ -39,7 +39,7 @@ function clear_folder(folder)
     for filename in os.listdir(folder)
         file_path = os.path.join(folder, filename)
         try
-            rm(file_path, force=true, recursive=true)
+            rm(file_path, force=true, recursive=true) #rm = remove
         catch e #Exception as e
             @printf("Failed to delete %s. Reason: %s", file_path, e)
         end
@@ -56,7 +56,7 @@ function mkfolder(newpath)
         println("Folder $newpath already exists")
         clear_folder(newpath)
     else
-        os.mkdir(newpath)
+        os.mkdir(newpath)# make directory
         println("Folder $newpath created!")
     end
 end
@@ -345,17 +345,20 @@ for sdata in samplefiles
     # a = a+1
     # println(global a)
     # diagram = rips.fit_transform(data)
-    diagram = ripserer(datas)#;alg=:homology["dgms"][1] #create H1 diagram
+    diagram = ripserer(datas)[2]#;alg=:homology["dgms"][1] #create H1 diagram
     println(typeof(diagram))
-    println(size(diagram))
+    println(size(diagram,2))
     println(length(diagram))
+    println(diagram[5])
+    println(diagram[5][1])
     # diagram = ripser.ripser(datass)["dgms"][1] #create H1 diagram
     # idxpairs.append([idx, diagram])
     # plot_diagrams(diagram, show=True)
     # diagram_df = pd.DataFrame(diagram)
-    # diagram_df.to_csv(ripspath*"/"*sdata, header = None,index = None)
-    # diagram_df = DataFrame(diagram) #,:auto)
-    # CSV.write(ripspath*"/"*sdata, sample_df)
+    # diagram_df.to_csv(ripspath*"/"*sdata)#, header = None,index = None)
+    # diagram_df = DataFrame(NamedTuple{(:a, :b, :c)}.(diagram))
+    diagram_df = DataFrame(diagram) #,:auto)
+    CSV.write(ripspath*"/"*sdata, diagram_df)
 end
 
 println("fin")
