@@ -205,9 +205,9 @@ for image in binfiles
     # println(size(imageToMatrice))
     imageMat = matimg.imread(bin_path)
     # println(typeof(imageMat))
-    aaa = imageMat.size    
+    aaa = size(imageMat)
     if length(aaa)>2
-        if(imageMat.size[3] == 3)
+        if(aaa[3] == 3)
     # reshape it from 3D matrice to 2D matrice
             imageMat_reshape = imageMat.reshape(imageMat.shape[0],
      									-1)
