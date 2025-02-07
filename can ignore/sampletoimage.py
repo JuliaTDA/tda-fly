@@ -5,7 +5,7 @@ Created on Wed Jun 26 04:17:52 2024
 @author: SergioNote
 """
 
-
+#########  plota imagens dos dados ###############
 
 # import glob
 import os
