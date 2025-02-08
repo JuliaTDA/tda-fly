@@ -106,6 +106,7 @@ for csvfile in csvfiles
     # df_out.to_csv(newsplepath+'/'+csvfile,header = None,index = None)
     sample_df = DataFrame(NamedTuple{(:a, :b)}.(list_ok))
     CSV.write(newsplepath*"/"*csvfile, sample_df)
+    println(size(sample_df))
 end
 
 print("end")
