@@ -363,7 +363,8 @@ println("created and saved samples")
 ripspath = "./ripsdgm"
 mkfolder(ripspath)
   
-samplefiles = os.listdir(samplepath)
+# samplefiles = os.listdir(samplepath)
+samplefiles = os.listdir(newsplepath)
 # rips = Rips()
 
 
@@ -371,7 +372,8 @@ samplefiles = os.listdir(samplepath)
 # a = 0
 idxpairs =[]
 for sdata in samplefiles
-    datapath = samplepath*"/"*sdata
+    # datapath = samplepath*"/"*sdata
+    datapath = newsplepath*"/"*sdata
     # data = pd.read_csv(datapath)
     data = DataFrame(CSV.File(datapath))
     # datas = np.array(data)
