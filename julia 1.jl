@@ -29,6 +29,9 @@ using Ripserer
 @pyimport persim
 @pyimport scipy
 using DataFrames
+using Distances
+
+DISTANCE_MIN = 5
 
 
 
@@ -268,44 +271,76 @@ println("created the dataframes and saved in csv files")
 
 
 
-
+#####################################
 ### samples (lesser points)
-
+###################################
 
 ### samplesize = 7000 is too big
 ### samplesize around 2000 seens ok
 
-samplesize = 1000
+# samplesize = 1000
 
-samplepath = "./samples"
-mkfolder(samplepath)
+# samplepath = "./samples"
+# mkfolder(samplepath)
 
+# csvfiles = os.listdir(csvpath)
+
+
+# for csvfile in csvfiles
+#     csv_path = csvpath *"/"* csvfile
+#     mydata = DataFrame(CSV.File(csv_path))
+#     # mydata = pd.read_csv(csv_path)
+#     # coords = np.array(mydata)
+#     coordsmat = Tuple.(eachrow(mydata))
+#     list_coords = []
+#     for point in coordsmat
+#         # list_coords.append([point[0], point[1]])
+#         push!(list_coords, point) #[point[1], point[2]])
+#     end
+#     # println(first(mydata,1))
+#     if length(list_coords)<samplesize
+#         println("file too small " * csvfile)
+#     else
+#         # println("ate aqui")
+#         sample = random.sample(list_coords, samplesize)
+#         # sample_df = pd.DataFrame(sample)
+#         # sample_df.to_csv(samplepath*"/"*csvfile,header = None,index = None)#header {(:a, :b)}
+#         sample_df = DataFrame(NamedTuple{(:a, :b)}.(sample))
+#         CSV.write(samplepath*"/"*csvfile, sample_df)
+#     end
+# end
+
+
+
+newsplepath = "./newsamples"
+mkfolder(newsplepath)
+
+csvpath = "./csvfles"
 csvfiles = os.listdir(csvpath)
-
 
 for csvfile in csvfiles
     csv_path = csvpath *"/"* csvfile
-    mydata = DataFrame(CSV.File(csv_path))
-    # mydata = pd.read_csv(csv_path)
-    # coords = np.array(mydata)
-    coordsmat = Tuple.(eachrow(mydata))
-    list_coords = []
-    for point in coordsmat
-        # list_coords.append([point[0], point[1]])
-        push!(list_coords, point) #[point[1], point[2]])
+    local_df = DataFrame(CSV.File(csv_path))
+    first = true 
+    list_ok = Array[]
+    for row in eachrow(local_df) 
+        if first
+            push!(list_ok, [row[1], row[2]])
+            first = false
+            continue
+        end    
+        point = [row[1], row[2]]
+        if any((euclidean(point, point_ok) < DISTANCE_MIN for point_ok in list_ok))
+            continue
+        end    
+        push!(list_ok,point)
     end
-    # println(first(mydata,1))
-    if length(list_coords)<samplesize
-        println("file too small " * csvfile)
-    else
-        # println("ate aqui")
-        sample = random.sample(list_coords, samplesize)
-        # sample_df = pd.DataFrame(sample)
-        # sample_df.to_csv(samplepath*"/"*csvfile,header = None,index = None)#header {(:a, :b)}
-        sample_df = DataFrame(NamedTuple{(:a, :b)}.(sample))
-        CSV.write(samplepath*"/"*csvfile, sample_df)
-    end
+    sample_df = DataFrame(NamedTuple{(:a, :b)}.(list_ok))
+    CSV.write(newsplepath*"/"*csvfile, sample_df)
+    println(size(sample_df))
 end
+
+
 
 println("created and saved samples")
 
