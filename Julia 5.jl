@@ -17,10 +17,15 @@ using LinearAlgebra
 # using Plots
 using Printf
 using SparseArrays
+using JLD2
 
 using PyCall
 os = pyimport("os")
 
+
+DIRECTIONS = 8
+## cut parameter
+cut_parm = 150
 
 ####################################
 ## empty the indicated folder
@@ -48,6 +53,38 @@ function mkfolder(newpath)
 end
 
 
+#########################################
+# 1 - read the diagram
+# 2 - detect short intervals
+# 3 - remove said intervals
+###########################################
+
+
+
+
+##########################
+function thin_den(dendogram, cut_parm)
+    del_list = []
+    nn = size(dendogram)[1]
+    # println(nn)
+    for n in 1:1:size(dendogram)[1]
+        comp = dendogram[n,2]-dendogram[n,1]
+        if comp < cut_parm
+            push!(del_list, n)
+        end
+    end
+    red_dendogram = deleterows!(dendogram, del_list) 
+    # # deleteat!for recent julia version as deleterows is deprecated
+    println(nn,"/", size(red_dendogram)[1])      
+    return red_dendogram
+end
+
+########################################
+
+
+
+
+
 
 # directions = 4
 # angles = [n*pi/(directions/2) for n in 1:directions]
@@ -55,28 +92,32 @@ end
 
 phtpath = "./pht_df"
 mkfolder(phtpath)
+listpath = "./dflist"
+mkfolder(listpath)
 samplepath  = "./newsamples"
 samplefiles = os.listdir(samplepath)
-
+save_object(listpath*"/list.jld2", samplefiles)  #save the file
+#load_object("list.jld2") # load the file
 
 ########################
 ## number of directions
 ########################
 
-directions = 8
-
+directions = DIRECTIONS
 for sample in samplefiles
     datapath = samplepath*"/"*sample
-    println("here")
+    # println("here")
     Boundary = CSV.read(datapath)
-    println("and here")
+    # println("and here")
     P_D = PHT(Boundary, directions)
     # println(P_D)
     for n in 1:directions
         P_Dn = P_D[n]
         PDn = DataFrame(P_Dn)
+        replace!(PDn.x2, Inf => 800)
+        PDnn = thin_den(PDn, cut_parm)
         nindex = string(n)
-        CSV.write(phtpath*"/"*nindex*sample, PDn)
+        CSV.write(phtpath*"/"*nindex*sample, PDnn)
     end
     # println(typeof(P_D1))
     # println(typeof(PD_1))
