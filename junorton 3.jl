@@ -1,4 +1,4 @@
-"""julia 2.1"""
+"""julia 2"""
 
 using PyCall
 
