@@ -75,7 +75,8 @@ for img in imgfiles
     #     for iw in 1:100:w - 100, 
     #     ih in 1:100:h - 100]
     for (i, im) in enumerate(ims)
-        save("./junimg/"*img*"-$(lpad(i, 3, "0")).png", im)
+        # save("./junimg/"*img*"-$(lpad(i, 3, "0")).png", im)
+        save("./junimg/"*img*"-$(i).png", im)
     end
 end
 

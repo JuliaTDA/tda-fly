@@ -17,7 +17,7 @@ shutil = pyimport("shutil")
 @pyimport sys
 @pyimport pathlib
 @pyimport matplotlib.image as matimg
-@pyimport pandas as pd
+pd = pyimport("pandas")
 @pyimport random
 @pyimport persim
 @pyimport scipy
@@ -29,7 +29,7 @@ using Ripserer
 using DataFrames
 using Distances
 
-DISTANCE_MIN = 10
+DISTANCE_MIN = 5
 
 ###############################
 ## auxiliary map (saves lists)

@@ -4,7 +4,7 @@ using PyCall
 
 os = pyimport("os")
 np = pyimport("numpy")
-@pyimport pandas as pd
+pd = pyimport("pandas")
 shutil = pyimport("shutil")
 using CSV
 using DataFrames
@@ -99,3 +99,4 @@ for dend in dendfiles
 end
 
 println("fin")
+
