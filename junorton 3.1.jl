@@ -62,7 +62,7 @@ dendfiles = os.listdir(ripspath)
 
 
 ## cut parameter
-cut_parm = 2
+cut_parm = 0
 
 
 ##########################

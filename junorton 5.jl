@@ -46,6 +46,10 @@ thelist = loadList("./jundistancemtx/namelist.npy")
 # distmat =  pd.read_csv(datapath)
 
 red_dm =  loadList(distancemtxpath*"/"*"cond_dist_mat.npy")
+# red_dm =  loadList(distancemtxpath*"/"*"cond_dist_mat1.npy")
+# red_dm =  loadList(distancemtxpath*"/"*"cond_dist_mat2.npy")
+# red_dm =  loadList(distancemtxpath*"/"*"cond_dist_mat3.npy")
+# red_dm =  loadList(distancemtxpath*"/"*"cond_dist_mat4.npy")
 y=red_dm
 Z =SciPy.cluster.hierarchy.linkage(y, method="single", metric="euclidean", optimal_ordering=false)
 

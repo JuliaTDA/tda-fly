@@ -96,6 +96,10 @@ foo = length(idxlist) # list of cut figures
 faa = Int64(foo*(foo+1)/2)
 
 cond_mat = []
+cond_mat1 = []
+cond_mat2 = []
+cond_mat3 = []
+cond_mat4 = []
 for n in 1:mtx_size
     name1 = lista[n]
     dgmp_1 = ripspath*"/"*name1*"-1.csv"
@@ -128,9 +132,13 @@ for n in 1:mtx_size
         d_2, matching = persim.bottleneck(dgma2, dgmb2, matching=true)
         d_3, matching = persim.bottleneck(dgma3, dgmb3, matching=true)
         d_4, matching = persim.bottleneck(dgma4, dgmb4, matching=true)
-        d = d_1 + d_2 + d_3 +d_4
+        d =  d_2  +d_4
         # println(d)
         push!(cond_mat, d)
+        push!(cond_mat1, d_1)
+        push!(cond_mat2, d_2)
+        push!(cond_mat3, d_3)
+        push!(cond_mat4, d_4)
         # red_mat.append(d)
     end
     # for i in 1:4
@@ -140,7 +148,11 @@ for n in 1:mtx_size
     # end
 end
 condensed_array = np.array(cond_mat)
-saveList(cond_mat, distancemtxpath*"/"*"cond_dist_mat.npy")  
+saveList(cond_mat, distancemtxpath*"/"*"cond_dist_mat.npy") 
+saveList(cond_mat1, distancemtxpath*"/"*"cond_dist_mat1.npy") 
+saveList(cond_mat2, distancemtxpath*"/"*"cond_dist_mat2.npy")
+saveList(cond_mat3, distancemtxpath*"/"*"cond_dist_mat3.npy")
+saveList(cond_mat4, distancemtxpath*"/"*"cond_dist_mat4.npy")
 
 
 # for i in 1:4
