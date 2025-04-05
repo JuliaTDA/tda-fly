@@ -1,0 +1,12 @@
+name = "TDAfly"
+uuid = "916f0269-98eb-4575-9ce3-ff8d74f76d3f"
+authors = ["vituri <vituri.vituri@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
+
+[compat]
+CSV = "0.10.15"
+Distances = "0.10.12"
