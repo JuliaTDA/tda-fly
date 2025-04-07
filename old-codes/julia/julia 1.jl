@@ -318,6 +318,8 @@ mkfolder(newsplepath)
 csvpath = "./csvfles"
 csvfiles = os.listdir(csvpath)
 
+
+#! farthest point sample?????
 for csvfile in csvfiles
     csv_path = csvpath *"/"* csvfile
     local_df = DataFrame(CSV.File(csv_path))

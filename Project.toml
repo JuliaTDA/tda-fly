@@ -8,9 +8,13 @@ CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+MetricSpaces = "737298cd-3e4b-40c4-a4ce-863151543a8d"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
 CSV = "0.10.15"
 Distances = "0.10.12"
 ImageFiltering = "0.7.9"
 Images = "0.26.2"
+MetricSpaces = "1.0.0"
+Random = "1.11.0"

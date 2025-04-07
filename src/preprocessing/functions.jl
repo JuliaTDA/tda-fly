@@ -1,4 +1,6 @@
 using Images, ImageFiltering
+using Random
+using MetricSpaces
 
 function image_to_grey(path; blur = 1)        
     imfilter(load(path), Kernel.gaussian(blur)) .|> Gray
