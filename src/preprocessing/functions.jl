@@ -14,6 +14,5 @@ end
 function image_to_r2(image::Matrix; threshold = 0.5)
     m = convert(Array{Float32}, image)
     pts = [[i[1], i[2]] for i ∈ findall(<(0.5), m)]
-
-    pts
+    EuclideanSpace(pts)
 end

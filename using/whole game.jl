@@ -1,7 +1,8 @@
-using TDAfly
-using TDAfly.Preprocessing
-import MetricSpaces as MS
+using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
+using MetricSpaces
 using CairoMakie
+using Ripserer
+import Plots as PL
 
 # reading image and converting to points in R^2
 path = "images/processed/Asilidae 11.png"
@@ -11,11 +12,10 @@ pts = image_to_r2(img_gray)
 # no need to read image in other step
 path = "images/processed/Asilidae 11.png"
 pts = image_to_r2(path)
+X = random_sample(pts, 500)
 
-X = MS.EuclideanSpace(pts)
-# MS.farthest_points_sample(X, 1000)
+scatter(X, axis = (;aspect=DataAspect()))
 
-X2 = MS.random_sample(X, 1000)
-
-scatter(X2, axis = (;aspect=DataAspect()))
-
+pd = persistence_diagram(X)
+barcode(pd)
+PL.plot(pd)
