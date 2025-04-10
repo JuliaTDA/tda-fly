@@ -1,28 +1,14 @@
 name = "TDAfly"
-uuid = "916f0269-98eb-4575-9ce3-ff8d74f76d3f"
+uuid = "5ee89b08-7b45-4496-b6d5-71693e11a84c"
 authors = ["vituri <vituri.vituri@gmail.com>"]
 version = "0.1.0"
 
 [deps]
-CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 MetricSpaces = "737298cd-3e4b-40c4-a4ce-863151543a8d"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 Ripserer = "aa79e827-bd0b-42a8-9f10-2b302677a641"
-
-[compat]
-CSV = "0.10.15"
-CairoMakie = "0.13.2"
-Distances = "0.10.12"
-ImageFiltering = "0.7.9"
-Images = "0.26.2"
-MetricSpaces = "1.0.0"
-Plots = "1.40.7"
-Random = "1.11.0"
-Revise = "3.7.3"
-Ripserer = "0.16.14"
