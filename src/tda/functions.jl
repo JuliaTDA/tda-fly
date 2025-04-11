@@ -6,25 +6,20 @@ using MetricSpaces
 
 @reexport using MetricSpaces: random_sample
 
+# persistent homology
 function rips_pd(X::MetricSpace; cutoff = 0.1)
     pd = ripserer(X; cutoff = cutoff)
     pd
 end
 
-function cubical_pd(A::Array; cutoff = 0.1)
-    pd = ripserer(Cubical(-A); cutoff = cutoff)
-    pd
-end
+cubical_pd(A::Array; cutoff = 0.1) = ripserer(Cubical(-A); cutoff = cutoff)
 
-function plot_barcode(pd)
-    barcode(pd)
-end
+# plotting
+plot_barcode(pd) = barcode(pd)
 
-function plot_pd(pd)
-    PD.plot(pd)
-end
+plot_pd(pd) = PD.plot(pd)
 
-
+# array manipulation
 function modify_array(A, f::Function)
     ids = findall_ids(>(0.5), A)
     A2 = zero(A)
@@ -35,6 +30,7 @@ function modify_array(A, f::Function)
     A2
 end
 
+# closures to make filtration
 function dist_to_point(a, b)
     function (x, y; kwargs...)
         sqrt((x - a)^2 + (y - b)^2)
