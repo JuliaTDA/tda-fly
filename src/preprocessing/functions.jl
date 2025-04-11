@@ -1,32 +1,33 @@
 using Images, ImageFiltering, ImageTransformations
 using Random
 using MetricSpaces
+using ..TDAfly
 
-function image_to_grey(path::AbstractString; blur = 1)
-    imfilter(load(path), Kernel.gaussian(blur)) .|> Gray
+function crop_image(img; threshold = 0.5)
+    ids = findall_ids(<(threshold), img)
+    x1, x2 = extrema(first.(ids))
+    y1, y2 = extrema(last.(ids))
+    img[x1:x2, y1:y2]
 end
 
-function image_to_array(path::AbstractString)
-    image = image_to_grey(path)
-    convert(Array{Float32}, image)
-end
-
-function image_to_array(image::Matrix)
-    convert(Array{Float32}, image)
-end
-
-function image_to_r2(image::AbstractString; threshold = 0.5, blur = 1)
-    image = image_to_grey(image, blur = blur)
-    image_to_r2(image, threshold = threshold)
-end
-
-function image_to_r2(image::Matrix; threshold = 0.5)
-    m = image_to_array(image)
-    pts = [[i[1], i[2]] for i ∈ findall(<(0.5), m)]
-    EuclideanSpace(pts)
+function load_wing(path::AbstractString; blur = 1, pixels = 150)
+    img = imfilter(load(path), Kernel.gaussian(blur)) .|> Gray
+    cropped_img = crop_image(img)
+    resize_image(cropped_img, pixels = pixels)
 end
 
 function resize_image(img; pixels = 150)
-    ratio = 150 / size(img)[1]
-    imresize(img, ratio = ratio)    
+    ratio = pixels / size(img)[1]
+    imresize(img, ratio = ratio)
 end
+
+function image_to_array(img::Matrix)
+    A = convert(Array{Float32}, img)
+    A .|> (x -> 1-x)        
+end
+
+function image_to_r2(img::Matrix; threshold = 0.5)
+    A = image_to_array(img)
+    findall_ids(<(0.5), A) |> EuclideanSpace
+end
+

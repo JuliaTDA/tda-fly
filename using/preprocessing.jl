@@ -1,52 +1,40 @@
 using TDAfly
 using TDAfly.Preprocessing
-import MetricSpaces as MS
-using CairoMakie
-using Ripserer
-import Plots as PD
-using Images, ImageFiltering, ImageTransformations
-
+using TDAfly.TDA
 
 # reading image and converting to points in R^2
 path = "images/processed/Asilidae 11.png"
-img_gray = image_to_grey(path, blur = 1)
-pts = image_to_r2(img_gray)
+img = load_wing(path, blur = 1, pixels = 150)
+A = img |> image_to_array
+A
 
-# no need to read image in other step
-path = "images/processed/Asilidae 11.png"
-pts = image_to_r2(path)
+X = image_to_r2(img)
+X_rand = random_sample(X, 100)
 
-X = MS.EuclideanSpace(pts)
-# MS.farthest_points_sample(X, 1000)
+rips_pd(X_rand)
 
-X2 = MS.random_sample(X, 1000)
+# poinsts
+f = dist_to_point(0, 0)
+A2 = modify_array(A, f)
+heatmap(A2)
 
-scatter(X2, axis = (;aspect=DataAspect()))
+f = dist_to_point(25, 20)
+A2 = modify_array(A, f)
+heatmap(A2)
 
-img_gray
+f = dist_to_point(55, 420)
+A2 = modify_array(A, f)
+heatmap(A2)
 
+# lines
+f = dist_to_line((0, 0), (1, 1))
+A2 = modify_array(A, f)
+heatmap(A2)
 
-img = imresize(img_gray, ratio = ratio)
-length(img)
+f = dist_to_line((0, 0), (25, 100))
+A2 = modify_array(A, f)
+heatmap(A2)
 
-img = zeros(150, 150)
-for i ∈ 1:size(img)[1], j ∈ 1:size(img)[2]
-    img[i, j] = 1/((i-50)^2 + (j-50)^2)
-end
-
-plot(img)
-pd = ripserer(Cubical(img))
-PD.plot(pd)
-barcode(pd)
-
-img_gray = image_to_grey(path, blur = 1)
-img = resize_image(img_gray)
-M = image_to_array(img)
-M .= (1 .- M)
-heatmap(M)
-
-ids = findall(>(0.5), M)
-ids[1]
-
-### fazer função que colore a imagem dada um critério:
-# distância até reta, etc.
+f = dist_to_line((0, 0), (0, 1))
+A2 = modify_array(A, f)
+heatmap(A2)
