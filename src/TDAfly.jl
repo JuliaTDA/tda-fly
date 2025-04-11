@@ -1,5 +1,7 @@
 module TDAfly
 
+using Revise
+
 include("preprocessing/Preprocessing.jl");
 export Preprocessing;
 
