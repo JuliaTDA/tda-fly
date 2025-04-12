@@ -3,7 +3,7 @@ module TDA
 include("functions.jl");
 export persistence_diagram, 
     plot_barcode, 
-    plot_barcode, 
+    plot_pd, 
     modify_array, 
     dist_to_line, 
     dist_to_point,

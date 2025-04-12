@@ -3,6 +3,8 @@ module TDAfly
 using Revise
 using Reexport
 @reexport using CairoMakie: heatmap
+@reexport using Chain: @chain
+@reexport using ProgressMeter: @showprogress
 
 include("common/functions.jl");
 export findall_ids;

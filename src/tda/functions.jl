@@ -3,21 +3,23 @@ using Reexport
 using Ripserer
 import Plots as PD
 using MetricSpaces
+using PersistenceDiagrams
+
 
 @reexport using MetricSpaces: random_sample
 
 # persistent homology
-function rips_pd(X::MetricSpace; cutoff = 0.1)
-    pd = ripserer(X; cutoff = cutoff)
-    pd
+function rips_pd(X::MetricSpace; kwargs...)
+    pd = ripserer(X; kwargs...)
+    filter.(isfinite, pd)
 end
 
-cubical_pd(A::Array; cutoff = 0.1) = ripserer(Cubical(-A); cutoff = cutoff)
+cubical_pd(A::Array; kwargs...) = ripserer(Cubical(-A); kwargs...)
 
 # plotting
 plot_barcode(pd) = barcode(pd)
 
-plot_pd(pd) = PD.plot(pd)
+plot_pd(pd; kwargs...) = PD.plot(pd; kwargs...)
 
 # array manipulation
 function modify_array(A, f::Function)
