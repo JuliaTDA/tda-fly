@@ -32,5 +32,76 @@ number-sections: true
 ---
 
 ```{julia}
-using TDAfly
+using TDAfly, TDAfly.Preprocessing, TDAfly.TDA
+using Images
+using Plots: heatmap, plot, @layout
+using PersistenceDiagrams
+```
+
+## Introduction
+
+## Dataset
+
+We read all wings into images
+
+```{julia}
+paths = readdir("images/processed", join = true)
+wings = load_wing.(paths);
+
+mosaicview(wings, ncol = 4, fillvalue=1)
+```
+
+and calculate its persistence diagrams using the Vietoris-Rips etc.
+
+```{julia}
+rips = map(wings) do wing
+    # convert to points in R^2
+    X = image_to_r2(wing)
+    
+    # select a random sample
+    X_rand = random_sample(X, 750)
+    
+    # calculate the vietoris-rips barcode
+    pd = rips_pd(X_rand, cutoff = 5, threshold = 200)
+
+    # return only 1-dimensional pds
+    pd[2]
+end;
+```
+
+We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices
+
+```{julia}
+PI = PersistenceImage(rips, size = (10, 10))
+
+images = PI.(rips)
+
+function plot_wing_with_pd(rip, image, wing)
+  l = @layout [a b; c]
+
+  plot(
+      plot_pd(rip, persistence = true)
+      ,heatmap(image)
+      ,heatmap(wing)
+      ,layout = l
+  )
+end;
+```
+
+
+```{julia}
+i = 1
+plot_wing_with_pd(rips[i], images[i], wings[i])
+```
+
+
+```{julia}
+i = 2
+plot_wing_with_pd(rips[i], images[i], wings[i])
+```
+
+
+```{julia}
+i = 3
+plot_wing_with_pd(rips[i], images[i], wings[i])
 ```
