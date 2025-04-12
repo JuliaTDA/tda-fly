@@ -28,6 +28,6 @@ end
 
 function image_to_r2(img::Matrix; threshold = 0.5)
     A = image_to_array(img)
-    findall_ids(<(0.5), A) |> EuclideanSpace
+    findall_ids(>(0.5), A) |> EuclideanSpace
 end
 
