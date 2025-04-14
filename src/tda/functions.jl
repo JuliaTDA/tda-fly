@@ -1,7 +1,7 @@
 using ..TDAfly
 using Reexport
 using Ripserer
-import Plots as PD
+using Plots
 using MetricSpaces
 using PersistenceDiagrams
 
@@ -10,8 +10,7 @@ using PersistenceDiagrams
 
 # persistent homology
 function rips_pd(X::MetricSpace; kwargs...)
-    pd = ripserer(X; kwargs...)
-    filter.(isfinite, pd)
+    ripserer(X; kwargs...)
 end
 
 cubical_pd(A::Array; kwargs...) = ripserer(Cubical(-A); kwargs...)
@@ -19,28 +18,28 @@ cubical_pd(A::Array; kwargs...) = ripserer(Cubical(-A); kwargs...)
 # plotting
 plot_barcode(pd) = barcode(pd)
 
-plot_pd(pd; kwargs...) = PD.plot(pd; kwargs...)
+plot_pd(pd; kwargs...) = plot(pd; kwargs...)
 
 # array manipulation
 function modify_array(A, f::Function)
     ids = findall_ids(>(0.5), A)
     A2 = zero(A)
     for (x, y) in ids
-        A2[x, y] = f(x, y, A = A)
+        A2[x, y] = f(x, y)
     end
     
-    A2
+    A2 ./ maximum(A2)
 end
 
 # closures to make filtration
 function dist_to_point(a, b)
-    function (x, y; kwargs...)
+    function (x, y)
         sqrt((x - a)^2 + (y - b)^2)
     end
 end
 
 function dist_to_line((a1, b1), (a2, b2))
-    function (x, y; kwargs...)
+    function (x, y)
         T1 = (b2-b1)*x - (a2-a1)*y + a2*b1 - b2*a1
         T2 = sqrt((a2-a1)^2 + (b2-b1)^2)
 

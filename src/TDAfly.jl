@@ -2,9 +2,10 @@ module TDAfly
 
 using Revise
 using Reexport
-@reexport using CairoMakie: heatmap
+# @reexport using CairoMakie: heatmap
 @reexport using Chain: @chain
 @reexport using ProgressMeter: @showprogress
+@reexport using MetricSpaces: farthest_points_sample, random_sample;
 
 include("common/functions.jl");
 export findall_ids;

@@ -1,24 +1,24 @@
 ---
 title: "Diaptera wings classification using Topological Data Analysis"
 author:
-  - name: G. Vituri
-    orcid: 0000-0002-0760-5497
+  - name: Guilherme Vituri F. Pinto
+    orcid: 0000-0002-7813-8777
     corresponding: true
-    email: steve@curvenote.com
+    email: vituri.vituri@gmail.com
     roles:
       - Investigation
       - Project administration
       - Software
       - Visualization
     affiliations:
-      - etc
+      - Unesp
   - name: Sergio Ura
   - name: Northon
 keywords:
   - Topological Data Analysis
   - Persistent homology
 abstract: |
-  In September 2021, a significant jump in seismic activity on the island of La Palma (Canary Islands, Spain) signaled the start of a volcanic crisis that still continues at the time of writing. Earthquake data is continually collected and published by the Instituto Geográphico Nacional (IGN). ...
+  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
 plain-language-summary: |
   Earthquake data for the island of La Palma from the September 2021 eruption is found ...
 key-points:
@@ -32,9 +32,9 @@ number-sections: true
 ---
 
 ```{julia}
-using TDAfly, TDAfly.Preprocessing, TDAfly.TDA
-using Images
-using Plots: heatmap, plot, @layout, scatter
+using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
+using Images: mosaicview
+using Plots: plot, display, heatmap
 using PersistenceDiagrams
 ```
 
@@ -44,24 +44,35 @@ Falar sobre o dataset, TDA, etc.
 
 ## Methods
 
-We read all wings into images
+We load all wings into images
 
 ```{julia}
 paths = readdir("images/processed", join = true)
-species = basename.(paths)
+species = basename.(paths) .|> (x -> replace(x, ".png" => ""))
+individuals = map(species) do specie
+  s = split(specie, " ")
+  s[1][1] * "-" * s[2]
+end
 wings = load_wing.(paths)
-Xs = map(image_to_r2, wings)
+Xs = map(image_to_r2, wings);
+```
 
+```{julia}
 mosaicview(wings, ncol = 4, fillvalue=1)
 ```
 
-and then select 750 random points from each image
+### Vietoris-Rips filtration
+
+We select 500 points from each image using a farthest point sample method
 
 ```{julia}
-samples = random_sample.(Xs, 750);
+samples = map(Xs) do X
+  ids = farthest_points_sample(X, 500)
+  X[ids]
+end;
 ```
 
-to calculate its persistence diagrams using the Vietoris-Rips filtration etc.
+We then calculate its persistence diagrams using the Vietoris-Rips filtration etc.
 
 ```{julia}
 # get only the 1-dimensional PD
@@ -73,19 +84,7 @@ We create the 1-dimensional persistence image for each persistence diagram using
 ```{julia}
 PI = PersistenceImage(rips, size = (10, 10))
 
-images = PI.(rips)
-
-function plot_wing_with_pd(rip, image, sample, title)
-  l = @layout [a b; c]
-
-  plot(
-      plot_pd(rip, persistence = true)
-      ,heatmap(image)
-      ,scatter(first.(sample), last.(sample))
-      ,layout = l
-      ,plot_title = title
-  )
-end;
+images_rips = PI.(rips);
 ```
 
 ### Examples
@@ -93,33 +92,37 @@ end;
 Below are some examples of 1-dimensional barcodes, its persistence image and the original wing that generated it. Note: we are plotting the barcode using the birth and persistence.
 
 ```{julia}
-i = 1
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
+# plot some images to see the barcodes
+map([1, 4, 8, 10, 15]) do i
+  p = plot_wing_with_pd(rips[i], images_rips[i], samples[i], species[i])
+  display(p)
+end;
 ```
 
 
-```{julia}
-i = 5
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
-```
-
+We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap
 
 ```{julia}
-i = 8
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
+D = pairwise_distance(images_rips);
 ```
 
 ```{julia}
-i = 10
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
+plot_heatmap(D, individuals, "Distance matrix for Vietoris-Rips barcodes")
+```
+
+### Persistence Homology Transform
+
+Now we will create several filtrations based on points and lines, etc.
+
+```{julia}
+A = wings[1] |> image_to_array;
+f = dist_to_point(0, 0)
+Af = modify_array(A, f)
+heatmap(Af)
 ```
 
 ```{julia}
-i = 15
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
+point_pds = cubical_pd(Af, cutoff = 0.05)
+plot_pd(point_pds)
 ```
 
-```{julia}
-i = 16
-plot_wing_with_pd(rips[i], images[i], samples[i], species[i])
-```
