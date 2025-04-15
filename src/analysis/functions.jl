@@ -25,7 +25,7 @@ function plot_wing_with_pd(pd, image, sample, title)
     plot(
         plot_pd(pd, persistence = true)
         ,heatmap(image)
-        ,scatter(first.(sample), last.(sample))
+        ,scatter(last.(sample), first.(sample))
         ,layout = l
         ,plot_title = title
     )

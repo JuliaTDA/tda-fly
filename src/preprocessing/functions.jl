@@ -3,7 +3,7 @@ using Random
 using MetricSpaces
 using ..TDAfly
 
-function crop_image(img; threshold = 0.5)
+function crop_image(img; threshold = 0.8)
     ids = findall_ids(<(threshold), img)
     x1, x2 = extrema(first.(ids))
     y1, y2 = extrema(last.(ids))
@@ -28,6 +28,6 @@ end
 
 function image_to_r2(img::Matrix; threshold = 0.5)
     A = image_to_array(img)
-    findall_ids(>(0.5), A) |> EuclideanSpace
+    findall_ids(>(0.2), A) |> EuclideanSpace
 end
 

@@ -97,3 +97,9 @@ A2 = modify_array(A, f)
 heatmap(A2)
 pd = cubical_pd(A2)
 plot_barcode(pd)
+
+
+
+for  in 
+    
+end

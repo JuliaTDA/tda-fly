@@ -13,7 +13,11 @@ function rips_pd(X::MetricSpace; kwargs...)
     ripserer(X; kwargs...)
 end
 
-cubical_pd(A::Array; kwargs...) = ripserer(Cubical(-A); kwargs...)
+function cubical_pd(A::Array; kwargs...)
+    A2 = -copy(A) .+ 1    
+    ripserer(Cubical(A2); kwargs...)
+
+end
 
 # plotting
 plot_barcode(pd) = barcode(pd)
@@ -22,7 +26,7 @@ plot_pd(pd; kwargs...) = plot(pd; kwargs...)
 
 # array manipulation
 function modify_array(A, f::Function)
-    ids = findall_ids(>(0.5), A)
+    ids = findall_ids(>(0.3), A)
     A2 = zero(A)
     for (x, y) in ids
         A2[x, y] = f(x, y)
