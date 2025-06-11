@@ -11,7 +11,7 @@ author:
       - Software
       - Visualization
     affiliations:
-      - Unesp
+      - Universidade Estadual Paulista
   - name: Sergio Ura
   - name: Northon
 keywords:
@@ -20,10 +20,11 @@ keywords:
 abstract: |
   We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
 plain-language-summary: |
-  Earthquake data for the island of La Palma from the September 2021 eruption is found ...
+  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
 key-points:
-  - A web scraping script was developed to pull data from the Instituto Geogràphico Nacional into a machine-readable form for analysis
-  - Earthquake events on La Palma are consistent with the presence of both mantle and crustal reservoirs.
+  - Images taken from etc.
+  - Analysis resulted in etc.
+  - Results were etc.
 date: last-modified
 bibliography: references.bib
 citation:
@@ -72,29 +73,35 @@ samples = map(Xs) do X
 end;
 ```
 
+and create an empty dictionary to store all computations
+
+```{julia}
+simple_rips_dc = Dict();
+```
+
 We then calculate its persistence diagrams using the Vietoris-Rips filtration etc.
 
 ```{julia}
 # get only the 1-dimensional PD
-rips = rips_pd.(samples, cutoff = 5, threshold = 200) .|> last;
+simple_rips_dc["PD"] = rips_pd.(samples, cutoff = 5, threshold = 200) .|> last;
 ```
 
 We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices
 
 ```{julia}
-PI = PersistenceImage(rips, size = (10, 10))
+PI = PersistenceImage(simple_rips_dc["PD"], size = (10, 10))
 
-images_rips = PI.(rips);
+simple_rips_dc["PI"] = PI.(simple_rips_dc["PD"]);
 ```
 
-### Examples
+#### Examples
 
 Below are some examples of 1-dimensional barcodes, its persistence image and the original wing that generated it. Note: we are plotting the barcode using the birth and persistence.
 
 ```{julia}
 # plot some images to see the barcodes
 map([1, 4, 8, 10, 15]) do i
-  p = plot_wing_with_pd(rips[i], images_rips[i], samples[i], species[i])
+  p = plot_wing_with_pd(simple_rips_dc["PD"][i], simple_rips_dc["PI"][i], samples[i], species[i])
   display(p)
 end;
 ```
@@ -103,11 +110,15 @@ end;
 We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap
 
 ```{julia}
-D_rips = pairwise_distance(images_rips);
+simple_rips_dc["Distance_matrix"] = pairwise_distance(simple_rips_dc["PI"]);
 ```
 
 ```{julia}
-plot_heatmap(D_rips, individuals, "Distance matrix for Vietoris-Rips barcodes")
+plot_heatmap(
+  simple_rips_dc["Distance_matrix"], 
+  individuals, 
+  "Distance matrix for Vietoris-Rips barcodes"
+)
 ```
 
 ### Persistence Homology Transform
@@ -117,7 +128,7 @@ Now we will create several filtrations based on points and lines, etc.
 We start with the point (0, 0). Its filtration is the following
 
 ```{julia}
-A = wings[1] |> image_to_array;
+A = wings[10] |> image_to_array;
 f = dist_to_point(0, 0)
 Af = modify_array(A, f)
 heatmap(Af)
@@ -149,7 +160,51 @@ end
 
 Due to noise, some connected components are born in 0.2 and die only at 0. But the loops seems alright.
 
+Let's apply this idea to all images!
 
+```{julia}
+point_rips_dc = Dict()
+f = dist_to_point(0, 0)
+
+point_rips_dc["PD"] = map(wings) do wing
+  A = wing |> image_to_array;
+  Af = modify_array(A, f)
+  point_pds = cubical_pd(Af, cutoff = 0.05)[2]
+end;
+
+PI = PersistenceImage(point_rips_dc["PD"], size = (10, 10))
+point_rips_dc["PI"] = PI.(point_rips_dc["PD"]);
+```
+
+```{julia}
+final_dc = Dict();
+
+dics = [simple_rips_dc, point_rips_dc]
+
+final_dc["PI"] = simple_rips_dc["PI"] + point_rips_dc["PI"];
+```
+
+```{julia}
+final_dc["Distance_matrix"] = pairwise_distance(final_dc["PI"]);
+```
+
+```{julia}
+plot_heatmap(
+  final_dc["Distance_matrix"], 
+  individuals, 
+  "Distance matrix for Vietoris-Rips + point-based barcodes"
+)
+```
+
+```{julia}
+Xs = point_rips_dc["PI"]
+id = findfirst(==("c-39"), individuals)
+# id = 9
+X = Xs[id]
+heatmap(X)
+
+wings[10]
+```
 
 ## Draft.....
 
