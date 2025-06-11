@@ -13,7 +13,17 @@ author:
     affiliations:
       - Universidade Estadual Paulista
   - name: Sergio Ura
-  - name: Northon
+  - name: Northon Canevari Leme Penteado  
+    orcid: 0000-0002-7813-8777
+    corresponding: true
+    email: vituri.vituri@gmail.com
+    roles:
+      - Investigation
+      - Project administration
+      - Software
+      - Visualization
+    affiliations:
+      - Universidade Estadual Paulista
 keywords:
   - Topological Data Analysis
   - Persistent homology
