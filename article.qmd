@@ -30,6 +30,7 @@ bibliography: references.bib
 citation:
   container-title: Earth and Space Science
 number-sections: true
+engine: julia
 ---
 
 ```{julia}
@@ -196,15 +197,25 @@ plot_heatmap(
 )
 ```
 
+What happened?! Some wing has a big distance from everything else!
+
 ```{julia}
 Xs = point_rips_dc["PI"]
 id = findfirst(==("c-39"), individuals)
 # id = 9
 X = Xs[id]
 heatmap(X)
-
-wings[10]
 ```
+
+```{julia}
+wings[id]
+```
+
+```{julia}
+heatmap(wings[id])
+```
+
+The reason is that it has one small cycle right at the beggining of the filtration...
 
 ## Draft.....
 
