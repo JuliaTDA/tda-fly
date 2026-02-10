@@ -3,7 +3,7 @@ project:
   output-dir: docs
 
 manuscript:
-  article: article.qmd
+  article: index.qmd
 
 execute: 
   cache: true

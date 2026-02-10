@@ -6,6 +6,7 @@ using Reexport
 @reexport using Chain: @chain
 @reexport using ProgressMeter: @showprogress
 @reexport using MetricSpaces: farthest_points_sample, random_sample;
+using StatsBase: mean, median, std;
 
 include("common/functions.jl");
 export findall_ids;

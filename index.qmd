@@ -1,0 +1,354 @@
+---
+title: "Diaptera wings classification using Topological Data Analysis"
+author:
+  - name: Guilherme Vituri F. Pinto
+    orcid: 0000-0002-7813-8777
+    corresponding: true
+    email: vituri.vituri@gmail.com
+    roles:
+      - Investigation
+      - Project administration
+      - Software
+      - Visualization
+    affiliations:
+      - Universidade Estadual Paulista
+  - name: Sergio Ura
+  - name: Northon
+keywords:
+  - Topological Data Analysis
+  - Persistent homology
+abstract: |
+  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
+plain-language-summary: |
+  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
+key-points:
+  - Images taken from etc.
+  - Analysis resulted in etc.
+  - Results were etc.
+date: last-modified
+bibliography: references.bib
+citation:
+  container-title: Earth and Space Science
+number-sections: true
+jupyter: julia-1.12.4-project-1.12
+---
+
+```{julia}
+using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
+using Images: mosaicview
+using Plots: plot, display, heatmap, scatter
+using StatsPlots: boxplot
+using PersistenceDiagrams
+```
+
+## Introduction
+
+Falar sobre o dataset, TDA, etc.
+
+## Methods
+
+All images are in the `images/processed` directory. For each image, we load it, apply a gaussian blur, crop and make it have 150 pixels of height. The blurring step is necessary to "glue" small holes in the figure and keep it connected.
+
+```{julia}
+paths = readdir("images/processed", join = true)
+species = basename.(paths) .|> (x -> replace(x, ".png" => ""))
+
+# Extract family name from filename, normalizing typos and separators
+function extract_family(name)
+    family_raw = lowercase(split(name, r"[\s\-]")[1])
+    if family_raw in ("bibionidae", "biobionidae")
+        return "Bibionidae"
+    elseif family_raw in ("sciaridae", "scaridae")
+        return "Sciaridae"
+    else
+        return titlecase(family_raw)
+    end
+end
+
+families = extract_family.(species)
+
+individuals = map(species) do specie
+    parts = split(specie, r"[\s\-]")
+    string(extract_family(specie)[1]) * "-" * parts[end]
+end
+
+wings = load_wing.(paths, blur = 1.3)
+Xs = map(image_to_r2, wings);
+```
+
+```{julia}
+mosaicview(wings, ncol = 4, fillvalue=1)
+```
+
+### Vietoris-Rips filtration
+
+We select 1000 points from each image using a farthest point sample method
+
+```{julia}
+samples = map(Xs) do X
+  farthest_points_sample(X, 1000)
+end;
+```
+
+and create an empty dictionary to store all computations
+
+```{julia}
+simple_rips_dc = Dict();
+```
+
+We then calculate its persistence diagrams using the Vietoris-Rips filtration etc.
+
+```{julia}
+# get only the 1-dimensional PD
+simple_rips_dc["PD"] = rips_pd.(samples, cutoff = 5, threshold = 200) .|> last;
+```
+
+We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices
+
+```{julia}
+PI = PersistenceImage(simple_rips_dc["PD"], size = (10, 10))
+
+simple_rips_dc["PI"] = PI.(simple_rips_dc["PD"]);
+```
+
+#### Examples
+
+Below are some examples of 1-dimensional barcodes, its persistence image and the original wing that generated it. Note: we are plotting the barcode using the birth and persistence.
+
+```{julia}
+# plot one example per family
+example_indices = [findfirst(==(f), families) for f in unique(families)]
+map(example_indices) do i
+  p = plot_wing_with_pd(simple_rips_dc["PD"][i], simple_rips_dc["PI"][i], samples[i], species[i])
+  display(p)
+end;
+```
+
+
+We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap
+
+```{julia}
+simple_rips_dc["Distance_matrix"] = pairwise_distance(simple_rips_dc["PI"]);
+```
+
+```{julia}
+plot_heatmap(
+  simple_rips_dc["Distance_matrix"], 
+  individuals, 
+  "Distance matrix for Vietoris-Rips barcodes"
+)
+```
+
+
+
+## TDA Statistics Analysis
+
+We extract summary statistics from each 1-dimensional persistence diagram. These statistics capture different aspects of the topological structure:
+
+- **Number of intervals**: Total count of 1-dimensional features (loops)
+- **Maximum persistence**: The longest-lived feature
+- **Total persistence**: Sum of all persistence values
+- **Mean persistence**: Average persistence value
+- **Persistence entropy**: Normalized Shannon entropy of persistence values
+
+```{julia}
+using DataFrames
+
+# Extract statistics from persistence diagrams
+stats_matrix = hcat([pd_statistics(pd) for pd in simple_rips_dc["PD"]]...)'
+stat_names = ["count", "max_pers", "total_pers", "median_pers", "entropy"]
+
+# Create DataFrame for analysis
+stats_df = DataFrame(
+    sample = individuals,
+    family = families,
+    n_intervals = stats_matrix[:, 1],
+    max_pers = stats_matrix[:, 2],
+    total_pers = stats_matrix[:, 3],
+    median_pers = stats_matrix[:, 4],
+    entropy = stats_matrix[:, 5]
+)
+
+stats_df
+```
+
+### Statistics comparison by family
+
+```{julia}
+using Plots: boxplot
+
+p1 = boxplot(stats_df.family, stats_df.n_intervals,
+             title="Number of 1D Intervals", legend=false, ylabel="count")
+p2 = boxplot(stats_df.family, stats_df.max_pers,
+             title="Maximum Persistence", legend=false, ylabel="persistence")
+p3 = boxplot(stats_df.family, stats_df.entropy,
+             title="Persistence Entropy", legend=false, ylabel="entropy")
+plot(p1, p2, p3, layout=(1, 3), size=(900, 300))
+```
+
+## Distance Matrix Comparison
+
+We compute multiple distance metrics between persistence diagrams to compare their effectiveness for classification:
+
+1. **Euclidean distance** on persistence images (already computed)
+2. **Bottleneck distance** - maximum over all matchings
+3. **Wasserstein-1 distance** - optimal transport with q=1
+4. **Wasserstein-2 distance** - optimal transport with q=2
+
+```{julia}
+# Compute all distance matrices
+D_euclidean = simple_rips_dc["Distance_matrix"]
+D_bottleneck = bottleneck_distance_matrix(simple_rips_dc["PD"])
+D_wasserstein1 = wasserstein_distance_matrix(simple_rips_dc["PD"], q=1)
+D_wasserstein2 = wasserstein_distance_matrix(simple_rips_dc["PD"], q=2)
+
+distances = Dict(
+    "Euclidean (PI)" => D_euclidean,
+    "Bottleneck" => D_bottleneck,
+    "Wasserstein-1" => D_wasserstein1,
+    "Wasserstein-2" => D_wasserstein2
+);
+```
+
+```{julia}
+p1 = plot_heatmap(D_euclidean, individuals, "Euclidean (PI)")
+p2 = plot_heatmap(D_bottleneck, individuals, "Bottleneck")
+p3 = plot_heatmap(D_wasserstein1, individuals, "Wasserstein-1")
+p4 = plot_heatmap(D_wasserstein2, individuals, "Wasserstein-2")
+plot(p1, p2, p3, p4, layout=(2, 2), size=(900, 800))
+```
+
+## Classification Results
+
+We use k-nearest neighbors (k-NN) classification with leave-one-out cross-validation (LOOCV). With a small sample size, LOOCV is the optimal choice as it:
+
+- Uses all but one sample for training in each fold
+- Tests every sample exactly once
+- Provides nearly unbiased error estimates
+
+### Labels
+
+```{julia}
+labels = families
+```
+
+### Systematic comparison of all methods
+
+```{julia}
+# Test all combinations of distance metrics and k values
+results = []
+
+for (dist_name, D) in distances
+    for k in [1, 3]
+        result = loocv_knn(D, labels; k=k)
+        n_correct = sum(result.predictions .== labels)
+        push!(results, (
+            distance = dist_name,
+            k = k,
+            n_correct = n_correct,
+            n_total = length(labels),
+            accuracy = result.accuracy
+        ))
+    end
+end
+
+results_df = DataFrame(results)
+sort!(results_df, :accuracy, rev=true)
+results_df
+```
+
+### Best classifier evaluation
+
+```{julia}
+# Find best configuration
+best_row = results_df[1, :]
+best_dist = best_row.distance
+best_k = best_row.k
+
+println("Best method: $(best_dist) with k=$(best_k)")
+println("Accuracy: $(best_row.n_correct)/$(best_row.n_total) ($(round(best_row.accuracy * 100, digits=1))%)")
+
+# Get the corresponding distance matrix
+D_best = distances[best_dist]
+```
+
+### Detailed classification report
+
+```{julia}
+# Full classification report with statistical validation
+report = classification_report(D_best, labels; k=best_k, n_permutations=10000)
+
+println("=== Classification Report ===")
+println("Method: $(best_dist) + $(best_k)-NN")
+println("Accuracy: $(report.n_correct)/$(report.n_total) ($(round(report.accuracy * 100, digits=1))%)")
+println("95% CI: [$(round(report.ci_95.lower * 100, digits=1))%, $(round(report.ci_95.upper * 100, digits=1))%]")
+println("p-value: $(round(report.p_value, digits=4))")
+println("Chance level: $(round(report.chance_level * 100, digits=1))%")
+println("")
+println("Per-class accuracy:")
+cm = report.confusion_matrix
+for (i, cls) in enumerate(report.classes)
+    correct = cm[i, i]
+    total = sum(cm[i, :])
+    println("  $(cls): $(correct)/$(total) ($(round(correct/total * 100, digits=1))%)")
+end
+```
+
+### Confusion matrix
+
+```{julia}
+classes = report.classes
+n_classes = length(classes)
+
+println("Confusion Matrix (rows = true, columns = predicted):")
+# Header
+print(lpad("", 20))
+for cls in classes
+    print(lpad(cls[1:min(4,end)], 6))
+end
+println()
+# Rows
+for i in 1:n_classes
+    print(rpad(classes[i], 20))
+    for j in 1:n_classes
+        print(lpad(string(cm[i,j]), 6))
+    end
+    println()
+end
+```
+
+```{julia}
+# Visualize confusion matrix
+heatmap(cm,
+        xticks=(1:n_classes, classes),
+        yticks=(1:n_classes, classes),
+        xlabel="Predicted", ylabel="True",
+        title="Confusion Matrix",
+        color=:Blues,
+        clims=(0, maximum(cm)))
+```
+
+## Discussion
+
+The topological approach using persistence diagrams is applied to distinguish between four Diptera families (Asilidae, Bibionidae, Ceratopogonidae, and Sciaridae). Key findings:
+
+1. **Feature extraction**: The 1-dimensional persistence captures meaningful topological differences in wing venation patterns (loops and holes).
+
+2. **Distance metrics**: Comparing Euclidean distance on persistence images with topological distances (Bottleneck, Wasserstein) reveals which representation better captures discriminative information.
+
+3. **Statistical validation**: With 28 samples across 4 families, we report:
+   - Leave-one-out cross-validation accuracy
+   - 95% Wilson confidence intervals
+   - Permutation test p-value to confirm statistical significance
+
+### Limitations
+
+- Small sample size (n=28) limits the complexity of models we can reliably train
+- Unbalanced classes (8 Asilidae, 6 Bibionidae, 8 Ceratopogonidae, 6 Sciaridae) may affect classification performance
+- Image quality and preprocessing parameters may influence topological features
+
+### Future work
+
+- Extend dataset with more species and specimens per family
+- Explore additional filtration methods (line-based, directional)
+- Combine TDA features with traditional morphometric measurements

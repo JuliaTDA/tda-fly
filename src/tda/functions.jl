@@ -50,3 +50,73 @@ function dist_to_line((a1, b1), (a2, b2))
         abs(T1) / T2
     end
 end
+
+# =============================================================================
+# TDA Statistics - Feature extraction from persistence diagrams
+# =============================================================================
+
+"""
+    count_intervals(pd; threshold=0.0)
+
+Count the number of intervals in a persistence diagram with persistence > threshold.
+"""
+function count_intervals(pd; threshold=0.0)
+    count(i -> persistence(i) > threshold, pd)
+end
+
+"""
+    max_persistence(pd)
+
+Return the maximum persistence value in the diagram.
+"""
+function max_persistence(pd)
+    isempty(pd) ? 0.0 : maximum(persistence, pd)
+end
+
+"""
+    total_persistence(pd)
+
+Return the sum of all persistence values in the diagram.
+"""
+function total_persistence(pd)
+    isempty(pd) ? 0.0 : sum(persistence, pd)
+end
+
+"""
+    mean_persistence(pd)
+
+Return the mean persistence value in the diagram.
+"""
+function median_persistence(pd)
+    isempty(pd) ? 0.0 : median(persistence.(pd))
+end
+
+"""
+    persistence_entropy(pd)
+
+Compute the normalized Shannon entropy of persistence values.
+Higher entropy indicates more uniform distribution of persistence values.
+"""
+function persistence_entropy(pd)
+    isempty(pd) && return 0.0
+    L = total_persistence(pd)
+    L == 0 && return 0.0
+    probs = [persistence(i) / L for i in pd]
+    -sum(p > 0 ? p * log(p) : 0.0 for p in probs)
+end
+
+"""
+    pd_statistics(pd; threshold=0.0)
+
+Extract a feature vector of TDA statistics from a persistence diagram.
+Returns: [count, max_pers, total_pers, median_pers, entropy]
+"""
+function pd_statistics(pd; threshold=0.0)
+    [
+        Float64(count_intervals(pd; threshold=threshold)),
+        max_persistence(pd),
+        total_persistence(pd),
+        median_persistence(pd),
+        persistence_entropy(pd)
+    ]
+end
