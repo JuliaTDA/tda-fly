@@ -12,11 +12,32 @@ author:
       - Visualization
     affiliations:
       - Universidade Estadual Paulista
-  - name: Sergio Ura
-  - name: Northon
+  - name: Sergio T. Ura
+    orcid: 0000-0002-5414-6094
+    corresponding: true
+    email: sergio.ura@gmail.com
+    roles:
+      - Investigation
+      - Project administration
+      - Software
+      - Visualization
+    affiliations:
+      - Universidade Estadual Paulista
+  - name: Northon C. Leme Penteado
+    orcid: 0000-0002-9466-9906
+    corresponding: true
+    email: northon.canevari@ufca.edu.br
+    roles:
+      - Investigation
+      - Project administration
+      - Software
+      - Visualization
+    affiliations:
+      - Universidade Federal do Cariri
 keywords:
   - Topological Data Analysis
   - Persistent homology
+  - Diaptera classification
 abstract: |
   We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
 plain-language-summary: |
@@ -42,14 +63,30 @@ using PersistenceDiagrams
 
 ## Introduction
 
-Falar sobre o dataset, TDA, etc.
+A taxonomy (or taxonomic classification) is a scheme of classification, especially a hierarchical classification, in which things are organized into groups or types. Correct insect identification is critically important in
+entomological research, pest control, and insect-resource utilization. However, to identify an unknown species using traditional methods is very time consuming due to the vast number of insect species that must be identified
+and limited taxonomist resource @gaston1 and @gaston2.
+
+For insect groups, wing morphology is an important character for species identification. 
+ 
+This problem has been recognized since the end of the last century, and computer-based recognition systems have been developed to identify insect species automatically @weeks. For example, the “Digital Automated Identification System (DAISY)” @weeks2, @weeks3 and @watson was developed to automatically identify ichneumonid wasps on the basis of their wing features @weeks, and this program was also used to identify biting midges and moths @watson. The “Species Identified Automatically (SPIDA)” system was originally designed to distinguish between 121 species of Australian spiders @platnick and has been successfully tested for identifying wasps and bees using their wing characteristics @weeks3. In addition, the “Automatic Bee Identification System (ABIS)” was developed to identify bees by analyzing images of wing veins @francoi.
+
+All of these automatic identification systems involve two key processes: extracting and digitizing the taxonomic features and constructing a classifier model for identification.
+
+First, a recognition feature must be selected. The feature must be not only stable and distinguishable but also extractable and quantifiable by computer. The feature “color” was successfully used to identify moths and butterflies @qing, but its accuracy was limited by specimens fading with time or color shifts under different illumination. 
+
+In recent decades, software has been developed to digitize morphological characteristics and conduct consequent statistical analysis, such as principal component analysis and canonical correlation analysis, to establish the phylogenic relations of species. Examples of this software include TPSDig @rohlf, DrawWing @tofilski, @mutanen, @mutanen2 and SHAPE @iwata and @yoshioka, which are based on modern digitalizing methods, such as ‘Landmark’ and ‘Semilandmark’ @rohlf and @tofilski. 
+
+Most adult insects have wings that are frequently used in taxonomy. However, the detailed characteristics of veins and spots on wings require recognition and measurement by well-trained experts; thus, these features are difficult for general users to use. 
+
+The objective of this work is to use methods from TDA (Topological Data Analysis) to obtain a classification based on images of fly wings. Specifically, based on the venation extracted from those images.
 
 ## Methods
 
-All images are in the `images/processed` directory. For each image, we load it, apply a gaussian blur, crop and make it have 150 pixels of height. The blurring step is necessary to "glue" small holes in the figure and keep it connected.
+The anlysis start to load the wings images from a directory and for each image apply a gaussian blur, crop and to make it binary image and standardize the size with 150 pixels of height. The blurring step is necessary to disregard small holes in the figure and keep it connected.
 
 ```{julia}
-paths = readdir("images/processed", join = true)
+paths = readdir("C:/Users/north/Documents/tda-fly/images/processed", join=true)
 species = basename.(paths) .|> (x -> replace(x, ".png" => ""))
 individuals = map(species) do specie
   s = split(specie, " ")
@@ -65,7 +102,7 @@ mosaicview(wings, ncol = 4, fillvalue=1)
 
 ### Vietoris-Rips filtration
 
-We select 500 points from each image using a farthest point sample method
+We select 500 points from each image using a farthest point sample method ensuring a representative selection for wing venation
 
 ```{julia}
 samples = map(Xs) do X
@@ -80,14 +117,14 @@ and create an empty dictionary to store all computations
 simple_rips_dc = Dict();
 ```
 
-We then calculate its persistence diagrams using the Vietoris-Rips filtration etc.
+We then calculate its persistence diagrams using the Vietoris-Rips filtration.
 
 ```{julia}
 # get only the 1-dimensional PD
 simple_rips_dc["PD"] = rips_pd.(samples, cutoff = 5, threshold = 200) .|> last;
 ```
 
-We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices
+We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices.
 
 ```{julia}
 PI = PersistenceImage(simple_rips_dc["PD"], size = (10, 10))
@@ -108,7 +145,7 @@ end;
 ```
 
 
-We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap
+We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap.
 
 ```{julia}
 simple_rips_dc["Distance_matrix"] = pairwise_distance(simple_rips_dc["PI"]);
@@ -124,7 +161,8 @@ plot_heatmap(
 
 ### Persistence Homology Transform
 
-Now we will create several filtrations based on points and lines, etc.
+From the 500 selected points we use another method of complex filtration based on a line direction to study and compare the generated persistence diagrams. 
+
 
 We start with the point (0, 0). Its filtration is the following
 
@@ -230,3 +268,8 @@ end
 
 plot(ps...)
 ```
+
+### References
+
+::: {#refs}
+:::
