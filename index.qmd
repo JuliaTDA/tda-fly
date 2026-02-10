@@ -148,7 +148,7 @@ We extract summary statistics from each 1-dimensional persistence diagram. These
 - **Number of intervals**: Total count of 1-dimensional features (loops)
 - **Maximum persistence**: The longest-lived feature
 - **Total persistence**: Sum of all persistence values
-- **Median persistence**: Average persistence value
+- **Quantiles (10%, 25%, 50%, 75%, 90%)**: Distribution of persistence values, capturing the range of feature sizes
 - **Persistence entropy**: Normalized Shannon entropy of persistence values
 
 ```{julia}
@@ -156,7 +156,7 @@ using DataFrames
 
 # Extract statistics from persistence diagrams
 stats_matrix = collect(hcat([pd_statistics(pd) for pd in simple_rips_dc["PD"]]...)')
-stat_names = ["count", "max_pers", "total_pers", "median_pers", "entropy"]
+stat_names = ["count", "max_pers", "total_pers", "q10", "q25", "median_pers", "q75", "q90", "entropy"]
 
 # Create DataFrame for analysis
 stats_df = DataFrame(
@@ -165,8 +165,12 @@ stats_df = DataFrame(
     n_intervals = stats_matrix[:, 1],
     max_pers = stats_matrix[:, 2],
     total_pers = stats_matrix[:, 3],
-    median_pers = stats_matrix[:, 4],
-    entropy = stats_matrix[:, 5]
+    q10 = stats_matrix[:, 4],
+    q25 = stats_matrix[:, 5],
+    median_pers = stats_matrix[:, 6],
+    q75 = stats_matrix[:, 7],
+    q90 = stats_matrix[:, 8],
+    entropy = stats_matrix[:, 9]
 )
 
 stats_df
@@ -183,7 +187,17 @@ p2 = boxplot(stats_df.family, stats_df.max_pers,
              title="Maximum Persistence", legend=false, ylabel="persistence")
 p3 = boxplot(stats_df.family, stats_df.entropy,
              title="Persistence Entropy", legend=false, ylabel="entropy")
-plot(p1, p2, p3, layout=(1, 3), size=(900, 300))
+p4 = boxplot(stats_df.family, stats_df.q10,
+             title="Q10 Persistence", legend=false, ylabel="persistence")
+p5 = boxplot(stats_df.family, stats_df.q25,
+             title="Q25 Persistence", legend=false, ylabel="persistence")
+p6 = boxplot(stats_df.family, stats_df.median_pers,
+             title="Median Persistence", legend=false, ylabel="persistence")
+p7 = boxplot(stats_df.family, stats_df.q75,
+             title="Q75 Persistence", legend=false, ylabel="persistence")
+p8 = boxplot(stats_df.family, stats_df.q90,
+             title="Q90 Persistence", legend=false, ylabel="persistence")
+plot(p1, p2, p3, p4, p5, p6, p7, p8, layout=(2, 4), size=(1200, 600))
 ```
 
 ## Distance Matrix Comparison
