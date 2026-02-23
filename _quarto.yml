@@ -1,10 +1,16 @@
 project: 
   type: manuscript
   output-dir: docs
+  render:
+    - index.qmd
 
 manuscript:
   article: index.qmd
 
 execute: 
   cache: true
-  freeze: true
+  freeze: auto
+
+format:
+  html:
+    page-layout: full

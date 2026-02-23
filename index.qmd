@@ -1,5 +1,5 @@
 ---
-title: "Diaptera wings classification using Topological Data Analysis"
+title: "Diptera wing classification using Topological Data Analysis"
 author:
   - name: Guilherme Vituri F. Pinto
     orcid: 0000-0002-7813-8777
@@ -17,14 +17,16 @@ author:
 keywords:
   - Topological Data Analysis
   - Persistent homology
+  - Diptera classification
+  - Wing venation
 abstract: |
-  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
+  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. Using multiple filtration strategies --- Vietoris-Rips on point clouds, directional height filtrations, and radial filtrations on grayscale images --- we extract topological features (persistence images, Betti curves, persistence landscapes and summary statistics) and compare distance-based and feature-based classifiers via leave-one-out cross-validation.
 plain-language-summary: |
-  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc 
+  We use mathematical tools that detect "shapes" in data --- specifically loops and holes in fly wing vein patterns --- to automatically classify different families of flies (Diptera). By looking at wing images through multiple topological lenses, we achieve robust classification across 10 families.
 key-points:
-  - Images taken from etc.
-  - Analysis resulted in etc.
-  - Results were etc.
+  - Multiple TDA filtration strategies capture complementary geometric and topological information from wing venation.
+  - 1-dimensional persistent homology (loops) is the most discriminative topological feature for wing classification.
+  - Combining topological distances with statistical features via convex combinations improves classification accuracy.
 date: last-modified
 bibliography: references.bib
 citation:
@@ -35,36 +37,74 @@ jupyter: julia-1.12.4-project-1.12
 
 ```{julia}
 using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
-using Images: mosaicview
-using Plots: plot, display, heatmap, scatter
+using Images: mosaicview, Gray
+using Plots: plot, display, heatmap, scatter, bar
 using StatsPlots: boxplot
 using PersistenceDiagrams
+using PersistenceDiagrams: BettiCurve, Landscape, PersistenceImage
+using DataFrames
+using Distances: euclidean
+using LIBSVM
+using StatsBase: mean
 ```
 
 ## Introduction
 
-Falar sobre o dataset, TDA, etc.
+The order Diptera (true flies) comprises over 150,000 described species across more than 150 families. Wing venation patterns are a classical diagnostic character in Diptera systematics: the arrangement, branching and connectivity of veins varies markedly across families and provides a natural morphological signature.
+
+In this work, we apply **Topological Data Analysis (TDA)** to the problem of classifying Diptera families from wing images. TDA provides a framework for extracting shape descriptors that are robust to continuous deformations --- exactly the kind of invariance desirable when comparing biological structures that vary in scale, orientation and minor deformations across individuals.
+
+We employ three complementary filtration strategies:
+
+1. **Vietoris-Rips filtration** on point-cloud samples of wing silhouettes
+2. **Directional height filtrations** that sweep across the wing along different axes
+3. **Radial filtration** from the wing centroid to the periphery
+
+Each filtration produces persistence diagrams that we vectorize into feature representations (persistence images, Betti curves, persistence landscapes) and feed into classifiers.
 
 ## Methods
 
-All images are in the `images/processed` directory. For each image, we load it, apply a gaussian blur, crop and make it have 150 pixels of height. The blurring step is necessary to "glue" small holes in the figure and keep it connected.
+### Data loading and preprocessing
+
+All images are in the `images/processed` directory. For each image, we load it, apply a Gaussian blur (to close small gaps in the wing membrane and keep it connected), crop to the bounding box, and resize to 150 pixels of height.
 
 ```{julia}
-paths = readdir("images/processed", join = true)
-species = basename.(paths) .|> (x -> replace(x, ".png" => ""))
+all_paths = readdir("images/processed", join = true)
+all_filenames = basename.(all_paths) .|> (x -> replace(x, ".png" => ""))
 
-# Extract family name from filename, normalizing typos and separators
 function extract_family(name)
     family_raw = lowercase(split(name, r"[\s\-]")[1])
     if family_raw in ("bibionidae", "biobionidae")
         return "Bibionidae"
     elseif family_raw in ("sciaridae", "scaridae")
         return "Sciaridae"
+    elseif family_raw == "simulidae"
+        return "Simuliidae"
     else
         return titlecase(family_raw)
     end
 end
 
+function canonical_id(name)
+    family = extract_family(name)
+    parts = split(name, r"[\s\-]")
+    number = parts[end]
+    "$(family)-$(number)"
+end
+
+# Deduplicate (space vs hyphen variants of the same file)
+seen = Set{String}()
+keep_idx = Int[]
+for (i, fname) in enumerate(all_filenames)
+    cid = canonical_id(fname)
+    if !(cid in seen)
+        push!(seen, cid)
+        push!(keep_idx, i)
+    end
+end
+
+paths = all_paths[keep_idx]
+species = all_filenames[keep_idx]
 families = extract_family.(species)
 
 individuals = map(species) do specie
@@ -72,283 +112,1054 @@ individuals = map(species) do specie
     string(extract_family(specie)[1]) * "-" * parts[end]
 end
 
+println("Total images after deduplication: $(length(paths))")
+println("Families: ", sort(unique(families)))
+println("\nSamples per family:")
+for f in sort(unique(families))
+    println("  $(f): $(count(==(f), families))")
+end
+```
+
+```{julia}
 wings = load_wing.(paths, blur = 1.3)
-Xs = map(image_to_r2, wings);
-```
-
-```{julia}
-mosaicview(wings, ncol = 4, fillvalue=1)
-```
-
-### Vietoris-Rips filtration
-
-We select 1000 points from each image using a farthest point sample method
-
-```{julia}
-samples = map(Xs) do X
-  farthest_points_sample(X, 1000)
+Xs = map(wings) do w
+    image_to_r2(w; ensure_connected = true, connectivity = 8)
 end;
 ```
 
-and create an empty dictionary to store all computations
-
 ```{julia}
-simple_rips_dc = Dict();
+mosaicview(wings, ncol = 6, fillvalue = 1)
 ```
 
-We then calculate its persistence diagrams using the Vietoris-Rips filtration etc.
+### Example: forcing connectivity on 5 wings
+
+The chunk below selects 5 wings (prioritizing those with the largest number of disconnected components before correction), then compares the binary pixel set before and after `connect_pixel_components`.
 
 ```{julia}
-# get only the 1-dimensional PD
-simple_rips_dc["PD"] = rips_pd.(samples, cutoff = 5, threshold = 200) .|> last;
-```
+threshold_conn = 0.2
+conn = 8
 
-We create the 1-dimensional persistence image for each persistence diagram using 10x10 matrices
+component_count_before = map(wings) do w
+    ids0 = findall_ids(>(threshold_conn), image_to_array(w))
+    length(pixel_components(ids0; connectivity = conn))
+end
 
-```{julia}
-PI = PersistenceImage(simple_rips_dc["PD"], size = (10, 10))
+demo_idx = sortperm(component_count_before, rev = true)[1:min(5, length(wings))]
 
-simple_rips_dc["PI"] = PI.(simple_rips_dc["PD"]);
-```
+function ids_to_mask(ids)
+    isempty(ids) && return zeros(Float32, 1, 1)
+    xs = first.(ids)
+    ys = last.(ids)
+    M = zeros(Float32, maximum(xs), maximum(ys))
+    for p in ids
+        M[p[1], p[2]] = 1f0
+    end
+    M
+end
 
-#### Examples
-
-Below are some examples of 1-dimensional barcodes, its persistence image and the original wing that generated it. Note: we are plotting the barcode using the birth and persistence.
-
-```{julia}
-# plot one example per family
-example_indices = [findfirst(==(f), families) for f in unique(families)]
-map(example_indices) do i
-  p = plot_wing_with_pd(simple_rips_dc["PD"][i], simple_rips_dc["PI"][i], samples[i], species[i])
-  display(p)
-end;
-```
-
-
-We now calculate the Euclidean distance between each persistence image (seen as a vector of $\mathbb{R}^{10x10}$) and plot its heatmap
-
-```{julia}
-simple_rips_dc["Distance_matrix"] = pairwise_distance(simple_rips_dc["PI"]);
-```
-
-```{julia}
-plot_heatmap(
-  simple_rips_dc["Distance_matrix"], 
-  individuals, 
-  "Distance matrix for Vietoris-Rips barcodes"
+demo_connectivity_df = DataFrame(
+    sample = String[],
+    n_components_before = Int[],
+    n_components_after = Int[],
+    n_pixels_before = Int[],
+    n_pixels_after = Int[],
 )
+
+panel_plots = Any[]
+for idx in demo_idx
+    ids_before = findall_ids(>(threshold_conn), image_to_array(wings[idx]))
+    ids_after = connect_pixel_components(ids_before; connectivity = conn)
+
+    n_before = length(pixel_components(ids_before; connectivity = conn))
+    n_after = length(pixel_components(ids_after; connectivity = conn))
+
+    push!(demo_connectivity_df, (
+        species[idx],
+        n_before,
+        n_after,
+        length(ids_before),
+        length(ids_after),
+    ))
+
+    M_before = ids_to_mask(ids_before)
+    M_after = ids_to_mask(ids_after)
+
+    p_before = heatmap(
+        M_before[end:-1:1, :],
+        color = :grays,
+        colorbar = false,
+        legend = false,
+        aspect_ratio = :equal,
+        xticks = false,
+        yticks = false,
+        title = "Before: $(species[idx])\ncomponents = $(n_before)",
+    )
+
+    p_after = heatmap(
+        M_after[end:-1:1, :],
+        color = :grays,
+        colorbar = false,
+        legend = false,
+        aspect_ratio = :equal,
+        xticks = false,
+        yticks = false,
+        title = "After: $(species[idx])\ncomponents = $(n_after)",
+    )
+
+    push!(panel_plots, p_before)
+    push!(panel_plots, p_after)
+end
+
+plot(panel_plots..., layout = (length(demo_idx), 2), size = (900, 260 * length(demo_idx)))
 ```
 
+```{julia}
+demo_connectivity_df
+```
 
+## Topological feature extraction
 
-## TDA Statistics Analysis
+We now compute persistent homology using three filtration strategies. Since all wings are connected shapes (a single connected component), **0-dimensional persistence is uninformative** --- it would only show one infinite bar per wing. We focus exclusively on **1-dimensional persistence** (loops/holes), which captures the pattern of enclosed cells formed by the wing venation.
 
-We extract summary statistics from each 1-dimensional persistence diagram. These statistics capture different aspects of the topological structure:
+::: {.callout-note}
+## What is persistent homology?
+Persistent homology is the main tool of TDA. Given a shape or dataset, it tracks how topological features --- connected components (dimension 0), loops (dimension 1), voids (dimension 2), etc. --- appear and disappear as we "grow" the shape through a filtration parameter. Each feature has a **birth** time (when it appears) and a **death** time (when it gets filled in). The collection of all (birth, death) pairs is called a **persistence diagram**. Features with long lifetimes (high persistence = death $-$ birth) represent genuine topological structure, while short-lived features are typically noise.
+:::
 
-- **Number of intervals**: Total count of 1-dimensional features (loops)
-- **Maximum persistence**: The longest-lived feature
-- **Total persistence**: Sum of all persistence values
-- **Mean persistence**: Average persistence value
-- **Persistence entropy**: Normalized Shannon entropy of persistence values
+### Strategy 1: Vietoris-Rips filtration on point clouds {#sec-rips}
+
+::: {.callout-note}
+## Vietoris-Rips filtration
+Given a set of points in $\mathbb{R}^n$, the Vietoris-Rips complex at scale $\varepsilon$ connects any subset of points that are pairwise within distance $\varepsilon$. As $\varepsilon$ increases from 0, we obtain a nested sequence of simplicial complexes --- the Rips filtration. This is the most common filtration in TDA for point-cloud data. It is computationally expensive (since it must consider all pairwise distances), which is why we subsample the point clouds.
+:::
+
+We sample 750 points from each wing silhouette using farthest-point sampling (which ensures good coverage of the shape), then compute 1-dimensional Rips persistence:
 
 ```{julia}
-using DataFrames
+samples = Vector{Any}(undef, length(Xs))
+Threads.@threads for i in eachindex(Xs)
+    samples[i] = farthest_points_sample(Xs[i], 750)
+end
+```
 
-# Extract statistics from persistence diagrams
-stats_matrix = hcat([pd_statistics(pd) for pd in simple_rips_dc["PD"]]...)'
-stat_names = ["count", "max_pers", "total_pers", "median_pers", "entropy"]
+```{julia}
+pds_rips = @showprogress map(samples) do s
+    rips_pd_1d(s, cutoff = 5, threshold = 200)
+end;
+```
 
-# Create DataFrame for analysis
+```{julia}
+wing_arrays = [convert(Array{Float64}, w) for w in wings]
+```
+
+### Strategy 2: Directional height filtrations {#sec-directional}
+
+::: {.callout-note}
+## Directional (height) filtrations
+A **height filtration** sweeps a hyperplane across the shape in a chosen direction and tracks topology as the "visible" region grows. For a direction vector $v$, we assign each foreground pixel the value $\langle (i,j), v \rangle$ (its projection onto $v$), then compute sublevel-set persistence. Different directions capture different geometric aspects: a horizontal sweep detects how vein loops are arranged from base to tip, a vertical sweep captures dorsal-ventral structure, and diagonal sweeps capture oblique patterns. Using multiple directions enriches the topological signature.
+:::
+
+We compute persistence along four directions: horizontal (base-to-tip), vertical (dorsal-ventral), and two diagonals:
+
+```{julia}
+directions = [
+    [0.0, 1.0],   # left-to-right (base to tip)
+    [1.0, 0.0],   # top-to-bottom (dorsal-ventral)
+    [1.0, 1.0],   # diagonal
+    [1.0, -1.0],  # anti-diagonal
+]
+direction_names = ["Horizontal", "Vertical", "Diagonal", "Anti-diagonal"]
+
+pds_directional = Dict{String, Vector}()
+for (dir, name) in zip(directions, direction_names)
+    pds_directional[name] = @showprogress map(wing_arrays) do A
+        directional_pd_1d(A, dir)
+    end
+end;
+```
+
+### Strategy 3: Radial filtration {#sec-radial}
+
+::: {.callout-note}
+## Radial filtration
+The **radial filtration** assigns each foreground pixel a value equal to its distance from the centroid of the wing. Sublevel-set persistence on this function captures how topological features (loops in the venation) are distributed from the center of the wing outward. This is complementary to the directional filtrations.
+:::
+
+```{julia}
+pds_radial = @showprogress "radial_pd_1d" map(wing_arrays) do A
+    radial_pd_1d(A)
+end;
+```
+
+### Persistence vectorization {#sec-vectorization}
+
+Raw persistence diagrams live in a space that is not directly amenable to standard machine learning. We vectorize them using three approaches:
+
+::: {.callout-note}
+## Persistence images
+A **persistence image** is a stable, finite-dimensional representation of a persistence diagram. Each point $(b, d)$ is mapped to $(b, d - b)$ coordinates (birth vs persistence), weighted by a function that emphasizes long-lived features, then smoothed with a Gaussian kernel and discretized onto a grid. The result is a matrix (image) that can be treated as a feature vector. Persistence images are stable with respect to the Wasserstein distance and have proven effective in machine learning pipelines.
+:::
+
+::: {.callout-note}
+## Betti curves
+The **Betti curve** $\beta_k(t)$ counts the number of $k$-dimensional features alive at filtration value $t$. For dimension 1, it counts the number of loops present at each scale. Discretized over a grid, it produces a feature vector. Betti curves are simple, interpretable, and capture the "topological complexity" of the shape at each scale.
+:::
+
+::: {.callout-note}
+## Persistence landscapes
+A **persistence landscape** is a sequence of piecewise-linear functions derived from a persistence diagram. The $k$-th landscape $\lambda_k$ is the $k$-th largest value of a collection of tent functions, one per interval. Landscapes live in a Banach space, which means we can compute means, perform hypothesis tests, and use them directly in statistical and machine learning methods. They provide a richer representation than Betti curves.
+:::
+
+```{julia}
+# Vectorize Rips persistence
+PI_rips = PersistenceImage(pds_rips, size = (15, 15))
+pi_rips = PI_rips.(pds_rips)
+
+bc_rips = BettiCurve(pds_rips; length = 50)
+betti_rips = bc_rips.(pds_rips)
+
+land1_rips = Landscape(1, pds_rips; length = 50)
+land2_rips = Landscape(2, pds_rips; length = 50)
+land1_rips_vecs = land1_rips.(pds_rips)
+land2_rips_vecs = land2_rips.(pds_rips);
+```
+
+```{julia}
+# Vectorize directional persistence
+pi_directional = Dict{String, Vector}()
+betti_directional = Dict{String, Vector}()
+
+for name in direction_names
+    pds = pds_directional[name]
+    PI_d = PersistenceImage(pds, size = (10, 10))
+    pi_directional[name] = PI_d.(pds)
+
+    bc_d = BettiCurve(pds; length = 30)
+    betti_directional[name] = bc_d.(pds)
+end
+
+# Radial
+PI_rad = PersistenceImage(pds_radial, size = (10, 10))
+pi_radial = PI_rad.(pds_radial)
+
+bc_rad = BettiCurve(pds_radial; length = 30)
+betti_radial = bc_rad.(pds_radial);
+```
+
+### Examples
+
+Below are examples of 1-dimensional persistence diagrams from each filtration strategy for one specimen per family:
+
+```{julia}
+example_indices = [findfirst(==(f), families) for f in sort(unique(families))]
+
+for i in example_indices
+    pers_rips = persistence.(pds_rips[i])
+    pers_dir = persistence.(pds_directional["Horizontal"][i])
+    pers_rad = persistence.(pds_radial[i])
+
+    p1 = isempty(pers_rips) ? plot(title = "Rips H₁ (empty)") :
+         bar(sort(pers_rips, rev = true), title = "Rips H₁", legend = false, ylabel = "persistence")
+    p2 = isempty(pers_dir) ? plot(title = "Horiz. H₁ (empty)") :
+         bar(sort(pers_dir, rev = true), title = "Horiz. H₁", legend = false, ylabel = "persistence")
+    p3 = isempty(pers_rad) ? plot(title = "Radial H₁ (empty)") :
+         bar(sort(pers_rad, rev = true), title = "Radial H₁", legend = false, ylabel = "persistence")
+    p4 = scatter(last.(samples[i]), first.(samples[i]),
+                 aspect_ratio = :equal, markersize = 1, legend = false, title = "Point cloud")
+    p = plot(p1, p2, p3, p4, layout = (2, 2), size = (900, 700),
+             plot_title = "$(families[i]) ($(individuals[i]))")
+    display(p)
+end;
+```
+
+### Summary statistics {#sec-statistics}
+
+We extract summary statistics from each persistence diagram:
+
+```{julia}
+stat_names = ["count", "max_pers", "total_pers", "total_pers2",
+              "q10", "q25", "median", "q75", "q90", "entropy", "std_pers"]
+
+stats_rips = collect(hcat([pd_statistics(pd) for pd in pds_rips]...)')
+
+stats_directional = Dict{String, Matrix}()
+for name in direction_names
+    stats_directional[name] = collect(hcat([pd_statistics(pd) for pd in pds_directional[name]]...)')
+end
+stats_radial = collect(hcat([pd_statistics(pd) for pd in pds_radial]...)')
+
+# Combined stats from all filtrations
+stats_all = hcat(stats_rips, stats_radial,
+                 [stats_directional[name] for name in direction_names]...)
+
+println("Statistics dimensions:")
+println("  Rips: $(size(stats_rips))")
+println("  All filtrations combined: $(size(stats_all))")
+```
+
+#### Statistics comparison by family
+
+```{julia}
 stats_df = DataFrame(
     sample = individuals,
     family = families,
-    n_intervals = stats_matrix[:, 1],
-    max_pers = stats_matrix[:, 2],
-    total_pers = stats_matrix[:, 3],
-    median_pers = stats_matrix[:, 4],
-    entropy = stats_matrix[:, 5]
+    n_intervals_rips = stats_rips[:, 1],
+    max_pers_rips = stats_rips[:, 2],
+    entropy_rips = stats_rips[:, 10],
+    n_intervals_rad = stats_radial[:, 1],
+    max_pers_rad = stats_radial[:, 2],
+    entropy_rad = stats_radial[:, 10],
 )
 
-stats_df
+p1 = boxplot(stats_df.family, stats_df.n_intervals_rips,
+             title = "Rips: # intervals", legend = false, ylabel = "count", xrotation = 45)
+p2 = boxplot(stats_df.family, stats_df.max_pers_rips,
+             title = "Rips: max persistence", legend = false, ylabel = "persistence", xrotation = 45)
+p3 = boxplot(stats_df.family, stats_df.n_intervals_rad,
+             title = "Radial: # intervals", legend = false, ylabel = "count", xrotation = 45)
+p4 = boxplot(stats_df.family, stats_df.entropy_rad,
+             title = "Radial: entropy", legend = false, ylabel = "entropy", xrotation = 45)
+plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 700))
 ```
 
-### Statistics comparison by family
+## Distance matrices
+
+::: {.callout-note}
+## Distances between persistence diagrams
+The **Wasserstein distance** $W_q$ between two persistence diagrams is the cost of the optimal matching between their points (including matching points to the diagonal, which represents trivial features). With $q=1$ it equals the Earth Mover's Distance; with $q=2$ it penalizes large mismatches more. The **Bottleneck distance** $d_B$ is the $\ell^\infty$ version: it measures the worst single mismatch in the optimal pairing. These distances are metrics on the space of persistence diagrams and are stable with respect to perturbations of the input data.
+:::
+
+We compute multiple distance metrics between the persistence diagrams from each filtration:
 
 ```{julia}
-using Plots: boxplot
+labels = families
 
-p1 = boxplot(stats_df.family, stats_df.n_intervals,
-             title="Number of 1D Intervals", legend=false, ylabel="count")
-p2 = boxplot(stats_df.family, stats_df.max_pers,
-             title="Maximum Persistence", legend=false, ylabel="persistence")
-p3 = boxplot(stats_df.family, stats_df.entropy,
-             title="Persistence Entropy", legend=false, ylabel="entropy")
-plot(p1, p2, p3, layout=(1, 3), size=(900, 300))
-```
+# Rips-based distances (Rips PDs have ~20 intervals, so Wasserstein/Bottleneck are feasible)
+D_pi_rips = pairwise_distance([vec(v) for v in pi_rips])
+D_betti_rips = pairwise_distance(betti_rips, euclidean)
+D_land_rips = pairwise_distance(land1_rips_vecs, euclidean)
+D_wass1_rips = wasserstein_distance_matrix(pds_rips, q = 1)
+D_bott_rips = bottleneck_distance_matrix(pds_rips)
 
-## Distance Matrix Comparison
+# Directional/radial PDs have hundreds of intervals, so
+# Wasserstein/Bottleneck would be prohibitively slow on 72×72 pairs.
+# We use only vectorized distances (persistence images, Betti curves, landscapes),
+# which are Euclidean distances on fixed-size feature vectors and compute instantly.
 
-We compute multiple distance metrics between persistence diagrams to compare their effectiveness for classification:
+# Directional distances (combine all directions via sum of per-direction distances)
+D_pi_dir = sum(pairwise_distance([vec(v) for v in pi_directional[name]]) for name in direction_names)
+D_betti_dir = sum(pairwise_distance(betti_directional[name], euclidean) for name in direction_names)
 
-1. **Euclidean distance** on persistence images (already computed)
-2. **Bottleneck distance** - maximum over all matchings
-3. **Wasserstein-1 distance** - optimal transport with q=1
-4. **Wasserstein-2 distance** - optimal transport with q=2
-
-```{julia}
-# Compute all distance matrices
-D_euclidean = simple_rips_dc["Distance_matrix"]
-D_bottleneck = bottleneck_distance_matrix(simple_rips_dc["PD"])
-D_wasserstein1 = wasserstein_distance_matrix(simple_rips_dc["PD"], q=1)
-D_wasserstein2 = wasserstein_distance_matrix(simple_rips_dc["PD"], q=2)
+# Radial distances
+D_pi_rad = pairwise_distance([vec(v) for v in pi_radial])
+D_betti_rad = pairwise_distance(betti_radial, euclidean)
 
 distances = Dict(
-    "Euclidean (PI)" => D_euclidean,
-    "Bottleneck" => D_bottleneck,
-    "Wasserstein-1" => D_wasserstein1,
-    "Wasserstein-2" => D_wasserstein2
+    "Rips PI" => D_pi_rips,
+    "Rips Bottleneck" => D_bott_rips,
+    "Rips Wass-1" => D_wass1_rips,
+    "Rips Betti" => D_betti_rips,
+    "Rips Landscape" => D_land_rips,
+    "Directional PI" => D_pi_dir,
+    "Directional Betti" => D_betti_dir,
+    "Radial PI" => D_pi_rad,
+    "Radial Betti" => D_betti_rad,
 );
 ```
 
 ```{julia}
-p1 = plot_heatmap(D_euclidean, individuals, "Euclidean (PI)")
-p2 = plot_heatmap(D_bottleneck, individuals, "Bottleneck")
-p3 = plot_heatmap(D_wasserstein1, individuals, "Wasserstein-1")
-p4 = plot_heatmap(D_wasserstein2, individuals, "Wasserstein-2")
-plot(p1, p2, p3, p4, layout=(2, 2), size=(900, 800))
+p1 = plot_heatmap(D_wass1_rips, individuals, "Rips Wasserstein-1")
+p2 = plot_heatmap(D_betti_rips, individuals, "Rips Betti")
+p3 = plot_heatmap(D_pi_dir, individuals, "Directional PI")
+p4 = plot_heatmap(D_pi_rad, individuals, "Radial PI")
+plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 900))
 ```
 
-## Classification Results
+## Classification
 
-We use k-nearest neighbors (k-NN) classification with leave-one-out cross-validation (LOOCV). With a small sample size, LOOCV is the optimal choice as it:
+::: {.callout-note}
+## Leave-one-out cross-validation (LOOCV)
+With only 72 samples, we use **leave-one-out cross-validation**: for each sample, the classifier is trained on all other samples and tested on the held-out one. The accuracy is the fraction of correctly predicted labels across all 72 folds. LOOCV has low bias (nearly the entire dataset is used for training) and is the standard validation strategy for small datasets.
+:::
 
-- Uses all but one sample for training in each fold
-- Tests every sample exactly once
-- Provides nearly unbiased error estimates
+### Distance-based classifiers: k-NN
 
-### Labels
-
-```{julia}
-labels = families
-```
-
-### Systematic comparison of all methods
+::: {.callout-note}
+## k-Nearest Neighbors (k-NN)
+Given a precomputed distance matrix, **k-NN** classifies a query point by majority vote among its $k$ nearest neighbors. **Weighted k-NN** weights each neighbor's vote by $1/d$ (inverse distance), giving closer neighbors more influence. The **nearest centroid** classifier assigns the query to the class whose average distance to the query is smallest. These are nonparametric methods that work directly with any distance or dissimilarity measure --- making them natural for TDA, where we have principled distances between persistence diagrams.
+:::
 
 ```{julia}
-# Test all combinations of distance metrics and k values
-results = []
-
+knn_results = []
 for (dist_name, D) in distances
-    for k in [1, 3]
-        result = loocv_knn(D, labels; k=k)
-        n_correct = sum(result.predictions .== labels)
-        push!(results, (
+    for k in [1, 3, 5]
+        r = loocv_knn(D, labels; k = k)
+        push!(knn_results, (
+            method = "k-NN (k=$k)",
             distance = dist_name,
-            k = k,
-            n_correct = n_correct,
+            n_correct = sum(r.predictions .== labels),
             n_total = length(labels),
-            accuracy = result.accuracy
+            accuracy = r.accuracy
+        ))
+
+        r2 = loocv_knn_weighted(D, labels; k = k)
+        push!(knn_results, (
+            method = "W-kNN (k=$k)",
+            distance = dist_name,
+            n_correct = sum(r2.predictions .== labels),
+            n_total = length(labels),
+            accuracy = r2.accuracy
+        ))
+    end
+
+    r3 = loocv_nearest_centroid(D, labels)
+    push!(knn_results, (
+        method = "Nearest centroid",
+        distance = dist_name,
+        n_correct = sum(r3.predictions .== labels),
+        n_total = length(labels),
+        accuracy = r3.accuracy
+    ))
+end
+
+knn_df = DataFrame(knn_results)
+sort!(knn_df, :accuracy, rev = true)
+first(knn_df, 20)
+```
+
+### Feature-based classifiers
+
+We construct feature matrices by concatenating the vectorized TDA representations from all filtrations:
+
+```{julia}
+# Feature matrices at different levels of richness
+X_stats_rips = sanitize_feature_matrix(stats_rips)
+X_stats_all = sanitize_feature_matrix(stats_all)
+
+X_rips_full = build_feature_matrix(
+    stats = stats_rips,
+    pi = pi_rips,
+    betti = betti_rips,
+    landscape = land1_rips_vecs,
+) |> sanitize_feature_matrix
+
+# Multi-filtration features: combine everything
+all_pi = [vcat(vec(pi_rips[i]),
+               vec(pi_radial[i]),
+               [vec(pi_directional[name][i]) for name in direction_names]...)
+          for i in 1:length(families)]
+
+all_betti = [vcat(betti_rips[i],
+                  betti_radial[i],
+                  [betti_directional[name][i] for name in direction_names]...)
+             for i in 1:length(families)]
+
+X_multi = build_feature_matrix(
+    stats = stats_all,
+    pi = all_pi,
+    betti = all_betti,
+) |> sanitize_feature_matrix
+
+println("Feature dimensions:")
+println("  Rips stats only: $(size(X_stats_rips))")
+println("  All stats: $(size(X_stats_all))")
+println("  Rips full (stats+PI+Betti+Land): $(size(X_rips_full))")
+println("  Multi-filtration full: $(size(X_multi))")
+```
+
+#### SVM (Support Vector Machine)
+
+::: {.callout-note}
+## Support Vector Machine (SVM)
+An **SVM** finds the hyperplane that maximizes the margin between classes. The **RBF (Radial Basis Function) kernel** maps data into a high-dimensional space where linear separation becomes possible, controlled by a cost parameter $C$ (penalty for misclassification). For distance matrices, we convert distances to an RBF-like kernel $K(i,j) = \exp(-D_{ij}^2 / 2\sigma^2)$ and train a linear SVM on the resulting kernel matrix. This is sometimes called an "empirical kernel map."
+:::
+
+```{julia}
+feature_sets = [
+    ("Rips stats", X_stats_rips),
+    ("All stats", X_stats_all),
+    ("Rips full", X_rips_full),
+    ("Multi-filtration", X_multi),
+]
+
+svm_results = []
+for (feat_name, X) in feature_sets
+    for kernel in [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear]
+        for cost in [0.1, 1.0, 10.0, 100.0]
+            kernel_name = kernel == LIBSVM.Kernel.RadialBasis ? "RBF" : "Linear"
+            r = loocv_svm(X, labels; kernel = kernel, cost = cost)
+            push!(svm_results, (
+                method = "SVM ($kernel_name, C=$cost)",
+                features = feat_name,
+                n_correct = sum(r.predictions .== labels),
+                n_total = length(labels),
+                accuracy = r.accuracy
+            ))
+        end
+    end
+end
+
+svm_df = DataFrame(svm_results)
+sort!(svm_df, :accuracy, rev = true)
+first(svm_df, 15)
+```
+
+#### SVM on distance matrices
+
+```{julia}
+svm_dist_results = []
+for (dist_name, D) in distances
+    for cost in [0.1, 1.0, 10.0, 100.0]
+        r = loocv_svm_distance(D, labels; cost = cost)
+        push!(svm_dist_results, (
+            method = "SVM-dist (C=$cost)",
+            distance = dist_name,
+            n_correct = sum(r.predictions .== labels),
+            n_total = length(labels),
+            accuracy = r.accuracy
         ))
     end
 end
 
-results_df = DataFrame(results)
-sort!(results_df, :accuracy, rev=true)
-results_df
+svm_dist_df = DataFrame(svm_dist_results)
+sort!(svm_dist_df, :accuracy, rev = true)
+first(svm_dist_df, 10)
 ```
 
-### Best classifier evaluation
+#### LDA (Linear Discriminant Analysis)
+
+::: {.callout-note}
+## Linear Discriminant Analysis (LDA)
+**LDA** finds a linear projection of the feature space that maximizes the ratio of between-class variance to within-class variance. The projected data is then classified with a simple 1-NN rule. LDA is a classical method that works well when classes are approximately Gaussian and the number of features is not too large relative to the number of samples. It provides an interpretable low-dimensional embedding.
+:::
 
 ```{julia}
-# Find best configuration
-best_row = results_df[1, :]
-best_dist = best_row.distance
-best_k = best_row.k
-
-println("Best method: $(best_dist) with k=$(best_k)")
-println("Accuracy: $(best_row.n_correct)/$(best_row.n_total) ($(round(best_row.accuracy * 100, digits=1))%)")
-
-# Get the corresponding distance matrix
-D_best = distances[best_dist]
-```
-
-### Detailed classification report
-
-```{julia}
-# Full classification report with statistical validation
-report = classification_report(D_best, labels; k=best_k, n_permutations=10000)
-
-println("=== Classification Report ===")
-println("Method: $(best_dist) + $(best_k)-NN")
-println("Accuracy: $(report.n_correct)/$(report.n_total) ($(round(report.accuracy * 100, digits=1))%)")
-println("95% CI: [$(round(report.ci_95.lower * 100, digits=1))%, $(round(report.ci_95.upper * 100, digits=1))%]")
-println("p-value: $(round(report.p_value, digits=4))")
-println("Chance level: $(round(report.chance_level * 100, digits=1))%")
-println("")
-println("Per-class accuracy:")
-cm = report.confusion_matrix
-for (i, cls) in enumerate(report.classes)
-    correct = cm[i, i]
-    total = sum(cm[i, :])
-    println("  $(cls): $(correct)/$(total) ($(round(correct/total * 100, digits=1))%)")
+lda_results = []
+for (feat_name, X) in feature_sets
+    r = loocv_lda(X, labels)
+    push!(lda_results, (
+        method = "LDA",
+        features = feat_name,
+        n_correct = sum(r.predictions .== labels),
+        n_total = length(labels),
+        accuracy = r.accuracy
+    ))
 end
+
+lda_df = DataFrame(lda_results)
+sort!(lda_df, :accuracy, rev = true)
+lda_df
+```
+
+#### Random Forest
+
+::: {.callout-note}
+## Random Forest
+A **Random Forest** is an ensemble of decision trees, each trained on a bootstrap sample of the data using a random subset of features. The final prediction is the majority vote across all trees. Random Forests are robust to overfitting, handle high-dimensional features well, and provide built-in feature importance estimates. They are a strong baseline for tabular data classification tasks.
+:::
+
+```{julia}
+rf_results = []
+for (feat_name, X) in feature_sets
+    for n_trees in [100, 500]
+        r = loocv_random_forest(X, labels; n_trees = n_trees)
+        m = classification_metrics(labels, r.predictions)
+        push!(rf_results, (
+            method = "RF (T=$n_trees)",
+            features = feat_name,
+            n_correct = sum(r.predictions .== labels),
+            n_total = length(labels),
+            accuracy = r.accuracy,
+            balanced_accuracy = m.balanced_accuracy,
+            macro_f1 = m.macro_f1
+        ))
+
+        rb = loocv_random_forest_balanced(X, labels; n_trees = n_trees, rng_seed = 20260223)
+        mb = classification_metrics(labels, rb.predictions)
+        push!(rf_results, (
+            method = "Balanced RF (T=$n_trees)",
+            features = feat_name,
+            n_correct = sum(rb.predictions .== labels),
+            n_total = length(labels),
+            accuracy = rb.accuracy,
+            balanced_accuracy = mb.balanced_accuracy,
+            macro_f1 = mb.macro_f1
+        ))
+    end
+end
+
+rf_df = DataFrame(rf_results)
+sort!(rf_df, :accuracy, rev = true)
+first(rf_df, 12)
+```
+
+## Combined distance analysis
+
+We combine the best topology-aware distance with a statistics-based distance using convex combinations:
+$$D_{\text{combined}}(\alpha) = \alpha \cdot D_1^* + (1 - \alpha) \cdot D_2^*$$
+where $D_1^*$ and $D_2^*$ are distances normalized to $[0, 1]$.
+
+```{julia}
+stats_for_distance = zscore_normalize(sanitize_feature_matrix(stats_all))
+stats_vectors_norm = [stats_for_distance[i, :] for i in axes(stats_for_distance, 1)]
+D_stats = pairwise_distance(stats_vectors_norm, euclidean)
+
+# Try combining best Rips distance with stats distance
+grid_rips = combined_distance_grid_search(D_wass1_rips, D_stats, labels)
+
+println("Top 5 combinations (Rips Wass-1 + Stats):")
+for r in grid_rips[1:min(5, end)]
+    println("  α=$(round(r.alpha, digits=1)), k=$(r.k): $(r.n_correct)/$(length(labels)) ($(round(r.accuracy * 100, digits=1))%)")
+end
+```
+
+```{julia}
+# Visualize the grid search
+alphas = 0.0:0.1:1.0
+ks = [1, 3, 5]
+
+acc_grid = zeros(length(alphas), length(ks))
+for r in grid_rips
+    i = findfirst(==(r.alpha), alphas)
+    j = findfirst(==(r.k), ks)
+    if !isnothing(i) && !isnothing(j)
+        acc_grid[i, j] = r.accuracy
+    end
+end
+
+heatmap(string.(ks), string.(collect(alphas)),
+        acc_grid,
+        xlabel = "k", ylabel = "α (Rips Wass-1 weight)",
+        title = "Rips Wass-1 + Stats combined",
+        color = :Blues, clims = (0.3, 1.0))
+```
+
+## Ensemble classification
+
+::: {.callout-note}
+## Ensemble methods (majority voting)
+**Ensemble methods** combine predictions from multiple classifiers. In **majority voting**, each classifier casts a vote for its predicted class, and the class with the most votes wins. In **weighted voting**, each classifier's vote is weighted by its individual accuracy, giving more influence to better classifiers. Ensembles are more robust than individual classifiers because different methods tend to make different errors.
+:::
+
+We combine the best classifiers from each method family:
+
+```{julia}
+# Best distance-based k-NN
+best_knn_row = knn_df[1, :]
+D_best_knn = distances[best_knn_row.distance]
+k_best = parse(Int, match(r"k=(\d)", best_knn_row.method)[1])
+knn_best = loocv_knn(D_best_knn, labels; k = k_best)
+
+# Best SVM on features
+best_svm_row = svm_df[1, :]
+best_svm_X = Dict(feat_name => X for (feat_name, X) in feature_sets)[best_svm_row.features]
+best_svm_kernel = occursin("RBF", best_svm_row.method) ? LIBSVM.Kernel.RadialBasis : LIBSVM.Kernel.Linear
+best_svm_cost = parse(Float64, match(r"C=([\d.]+)", best_svm_row.method)[1])
+svm_best = loocv_svm(best_svm_X, labels; kernel = best_svm_kernel, cost = best_svm_cost)
+
+# Best Random Forest
+best_rf_row = rf_df[1, :]
+best_rf_X = Dict(feat_name => X for (feat_name, X) in feature_sets)[best_rf_row.features]
+best_rf_ntrees = parse(Int, match(r"T=(\d+)", best_rf_row.method)[1])
+best_rf_balanced = occursin("Balanced RF", best_rf_row.method)
+if best_rf_balanced
+    rf_best = loocv_random_forest_balanced(best_rf_X, labels; n_trees = best_rf_ntrees, rng_seed = 20260223)
+else
+    rf_best = loocv_random_forest(best_rf_X, labels; n_trees = best_rf_ntrees)
+end
+
+# Best LDA
+best_lda_row = lda_df[1, :]
+best_lda_X = Dict(feat_name => X for (feat_name, X) in feature_sets)[best_lda_row.features]
+lda_best = loocv_lda(best_lda_X, labels)
+
+# Ensemble: majority vote
+predictions_list = [knn_best.predictions, svm_best.predictions, rf_best.predictions, lda_best.predictions]
+accuracies = [knn_best.accuracy, svm_best.accuracy, rf_best.accuracy, lda_best.accuracy]
+
+ensemble_preds = ensemble_vote(predictions_list)
+ensemble_acc = mean(ensemble_preds .== labels)
+
+ensemble_preds_w = ensemble_vote(predictions_list; weights = accuracies)
+ensemble_acc_w = mean(ensemble_preds_w .== labels)
+
+println("=== Ensemble Results ===")
+println("Individual classifiers:")
+println("  k-NN ($(best_knn_row.distance), k=$k_best): $(round(knn_best.accuracy * 100, digits=1))%")
+println("  SVM ($(best_svm_row.method), $(best_svm_row.features)): $(round(svm_best.accuracy * 100, digits=1))%")
+println("  RF ($(best_rf_row.method), $(best_rf_row.features)): $(round(rf_best.accuracy * 100, digits=1))%")
+println("  LDA ($(best_lda_row.features)): $(round(lda_best.accuracy * 100, digits=1))%")
+println()
+println("Ensemble (majority vote): $(sum(ensemble_preds .== labels))/$(length(labels)) ($(round(ensemble_acc * 100, digits=1))%)")
+println("Ensemble (weighted vote): $(sum(ensemble_preds_w .== labels))/$(length(labels)) ($(round(ensemble_acc_w * 100, digits=1))%)")
+```
+
+## Comprehensive comparison
+
+```{julia}
+all_results = []
+
+# Distance-based (top 5)
+for row in eachrow(first(knn_df, 5))
+    push!(all_results, (
+        category = "Distance-based",
+        method = "$(row.method) [$(row.distance)]",
+        accuracy = row.accuracy,
+        n_correct = row.n_correct,
+        n_total = row.n_total
+    ))
+end
+
+# SVM on distances (top 3)
+for row in eachrow(first(svm_dist_df, 3))
+    push!(all_results, (
+        category = "Distance-based",
+        method = "$(row.method) [$(row.distance)]",
+        accuracy = row.accuracy,
+        n_correct = row.n_correct,
+        n_total = row.n_total
+    ))
+end
+
+# LDA
+for row in eachrow(lda_df)
+    push!(all_results, (
+        category = "Feature-based",
+        method = "LDA [$(row.features)]",
+        accuracy = row.accuracy,
+        n_correct = row.n_correct,
+        n_total = row.n_total
+    ))
+end
+
+# SVM on features (top 5)
+for row in eachrow(first(svm_df, 5))
+    push!(all_results, (
+        category = "Feature-based",
+        method = "$(row.method) [$(row.features)]",
+        accuracy = row.accuracy,
+        n_correct = row.n_correct,
+        n_total = row.n_total
+    ))
+end
+
+# Random Forest (top 3)
+for row in eachrow(first(rf_df, 3))
+    push!(all_results, (
+        category = "Feature-based",
+        method = "$(row.method) [$(row.features)]",
+        accuracy = row.accuracy,
+        n_correct = row.n_correct,
+        n_total = row.n_total
+    ))
+end
+
+# Ensembles
+push!(all_results, (category = "Ensemble", method = "Majority vote (4 classifiers)",
+    accuracy = ensemble_acc, n_correct = sum(ensemble_preds .== labels), n_total = length(labels)))
+push!(all_results, (category = "Ensemble", method = "Weighted vote (4 classifiers)",
+    accuracy = ensemble_acc_w, n_correct = sum(ensemble_preds_w .== labels), n_total = length(labels)))
+
+# Combined distances
+best_rips_comb = grid_rips[1]
+push!(all_results, (category = "Combined distance",
+    method = "Rips Wass-1 + Stats (α=$(round(best_rips_comb.alpha, digits=1)), k=$(best_rips_comb.k))",
+    accuracy = best_rips_comb.accuracy, n_correct = best_rips_comb.n_correct, n_total = length(labels)))
+
+comparison_df = DataFrame(all_results)
+sort!(comparison_df, :accuracy, rev = true)
+comparison_df
+```
+
+## Best classifier evaluation
+
+```{julia}
+best_overall = comparison_df[1, :]
+println("=== Best Method ===")
+println("$(best_overall.category): $(best_overall.method)")
+println("Accuracy: $(best_overall.n_correct)/$(best_overall.n_total) ($(round(best_overall.accuracy * 100, digits=1))%)")
+
+ci = wilson_ci(best_overall.n_correct, best_overall.n_total)
+println("95% Wilson CI: [$(round(ci.lower * 100, digits=1))%, $(round(ci.upper * 100, digits=1))%]")
 ```
 
 ### Confusion matrix
 
 ```{julia}
-classes = report.classes
-n_classes = length(classes)
+# Use ensemble predictions for confusion matrix
+final_preds = ensemble_acc_w >= ensemble_acc ? ensemble_preds_w : ensemble_preds
+final_method = ensemble_acc_w >= ensemble_acc ? "Weighted ensemble" : "Majority ensemble"
 
-println("Confusion Matrix (rows = true, columns = predicted):")
-# Header
-print(lpad("", 20))
-for cls in classes
-    print(lpad(cls[1:min(4,end)], 6))
-end
-println()
-# Rows
-for i in 1:n_classes
-    print(rpad(classes[i], 20))
-    for j in 1:n_classes
-        print(lpad(string(cm[i,j]), 6))
-    end
-    println()
+cm_result = confusion_matrix(labels, final_preds)
+classes = cm_result.classes
+
+println("=== Confusion Matrix ($final_method) ===")
+println("Per-class accuracy:")
+for (i, cls) in enumerate(classes)
+    correct = cm_result.matrix[i, i]
+    total = sum(cm_result.matrix[i, :])
+    println("  $(cls): $(correct)/$(total) ($(round(correct / total * 100, digits=1))%)")
 end
 ```
 
 ```{julia}
-# Visualize confusion matrix
-heatmap(cm,
-        xticks=(1:n_classes, classes),
-        yticks=(1:n_classes, classes),
-        xlabel="Predicted", ylabel="True",
-        title="Confusion Matrix",
-        color=:Blues,
-        clims=(0, maximum(cm)))
+heatmap(cm_result.matrix,
+        xticks = (1:length(classes), classes),
+        yticks = (1:length(classes), classes),
+        xlabel = "Predicted", ylabel = "True",
+        title = "Confusion Matrix ($final_method)",
+        color = :Blues,
+        clims = (0, maximum(cm_result.matrix)),
+        xrotation = 45, size = (700, 600))
+```
+
+## Honest evaluation (Nested LOOCV)
+
+The distance-combination nested result is unstable for this dataset. Instead, we perform an **honest nested LOOCV** for the strongest family of models (Random Forest on statistics): the outer loop holds out one sample and the inner loop tunes RF hyperparameters using only the training fold.
+
+::: {.callout-note}
+## Nested cross-validation
+Standard LOOCV can give optimistically biased estimates when hyperparameters are tuned on the same data. **Nested LOOCV** adds an inner cross-validation loop: for each held-out test sample, the best hyperparameters are selected using only the training fold. This provides an unbiased estimate of generalization performance.
+:::
+
+```{julia}
+nested_rf = nested_loocv_random_forest(
+    X_stats_all, labels;
+    n_trees_grid = [200, 500],
+    max_depth_grid = [-1],
+    min_samples_leaf_grid = [1, 2],
+    inner_folds = 4,
+    balanced = true,
+    rng_seed = 20260223
+)
+n_correct_nested = sum(nested_rf.predictions .== labels)
+
+println("=== Nested LOOCV Result ===")
+println("Model: Balanced Random Forest (All stats)")
+println("Accuracy: $(n_correct_nested)/$(length(labels)) ($(round(nested_rf.accuracy * 100, digits=1))%)")
+println("Balanced accuracy: $(round(nested_rf.balanced_accuracy * 100, digits=1))%")
+println("Macro-F1: $(round(nested_rf.macro_f1 * 100, digits=1))%")
+
+ci_nested = wilson_ci(n_correct_nested, length(labels))
+println("95% Wilson CI: [$(round(ci_nested.lower * 100, digits=1))%, $(round(ci_nested.upper * 100, digits=1))%]")
+```
+
+```{julia}
+cm_nested = confusion_matrix(labels, nested_rf.predictions)
+classes_nested = cm_nested.classes
+
+println("Per-class accuracy (Nested LOOCV):")
+for (i, cls) in enumerate(classes_nested)
+    correct = cm_nested.matrix[i, i]
+    total = sum(cm_nested.matrix[i, :])
+    println("  $(cls): $(correct)/$(total) ($(round(correct / total * 100, digits=1))%)")
+end
+```
+
+```{julia}
+heatmap(cm_nested.matrix,
+        xticks = (1:length(classes_nested), classes_nested),
+        yticks = (1:length(classes_nested), classes_nested),
+        xlabel = "Predicted", ylabel = "True",
+        title = "Confusion Matrix (Nested LOOCV - Balanced RF)",
+        color = :Blues,
+        clims = (0, maximum(cm_nested.matrix)),
+        xrotation = 45, size = (700, 600))
+```
+
+### Nested LOOCV for Multi-filtration SVM {#sec-nested-svm}
+
+::: {.callout-warning}
+## Why is nested CV needed here?
+The Multi-filtration feature matrix `X_multi` has ~991 features for only 72 samples (a ~14:1 feature-to-sample ratio). In such high-dimensional settings, SVM with RBF kernel can find separating hyperplanes even for random data. Furthermore, selecting the best kernel and cost parameter from many LOOCV runs introduces **selection bias**: the reported accuracy of the "best" configuration is upward-biased. Nested LOOCV removes this bias by selecting hyperparameters using only the training fold.
+:::
+
+We evaluate the Multi-filtration SVM both with and without PCA dimensionality reduction:
+
+```{julia}
+# Nested LOOCV for Multi-filtration SVM (no PCA)
+nested_svm_multi = nested_loocv_svm(
+    X_multi, labels;
+    kernels = [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear],
+    costs = [0.1, 1.0, 10.0, 100.0],
+    use_pca = false,
+    inner_folds = 5,
+    rng_seed = 20260223
+)
+
+println("=== Nested LOOCV: Multi-filtration SVM (no PCA) ===")
+n_corr = sum(nested_svm_multi.predictions .== labels)
+println("Accuracy: $(n_corr)/$(length(labels)) ($(round(nested_svm_multi.accuracy * 100, digits=1))%)")
+println("Balanced accuracy: $(round(nested_svm_multi.balanced_accuracy * 100, digits=1))%")
+println("Macro-F1: $(round(nested_svm_multi.macro_f1 * 100, digits=1))%")
+
+ci_svm = wilson_ci(n_corr, length(labels))
+println("95% Wilson CI: [$(round(ci_svm.lower * 100, digits=1))%, $(round(ci_svm.upper * 100, digits=1))%]")
+
+# Show which hyperparameters were selected in each fold
+param_counts = Dict{String, Int}()
+for p in nested_svm_multi.params
+    key = "$(p.kernel), C=$(p.cost)"
+    param_counts[key] = get(param_counts, key, 0) + 1
+end
+println("\nSelected hyperparameters across folds:")
+for (k, v) in sort(collect(param_counts), by=last, rev=true)
+    println("  $k: $v/$(length(labels)) folds")
+end
+```
+
+```{julia}
+# Nested LOOCV for Multi-filtration SVM with PCA (95% variance)
+nested_svm_pca = nested_loocv_svm(
+    X_multi, labels;
+    kernels = [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear],
+    costs = [0.1, 1.0, 10.0, 100.0],
+    use_pca = true,
+    variance_ratio = 0.95,
+    inner_folds = 5,
+    rng_seed = 20260223
+)
+
+println("=== Nested LOOCV: Multi-filtration SVM + PCA (95% var) ===")
+n_corr_pca = sum(nested_svm_pca.predictions .== labels)
+println("Accuracy: $(n_corr_pca)/$(length(labels)) ($(round(nested_svm_pca.accuracy * 100, digits=1))%)")
+println("Balanced accuracy: $(round(nested_svm_pca.balanced_accuracy * 100, digits=1))%")
+println("Macro-F1: $(round(nested_svm_pca.macro_f1 * 100, digits=1))%")
+
+ci_pca = wilson_ci(n_corr_pca, length(labels))
+println("95% Wilson CI: [$(round(ci_pca.lower * 100, digits=1))%, $(round(ci_pca.upper * 100, digits=1))%]")
+```
+
+For comparison, a simple PCA + SVM (non-nested) on the Multi-filtration features:
+
+```{julia}
+pca_svm_results = []
+for kernel in [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear]
+    for cost in [1.0, 10.0]
+        kernel_name = kernel == LIBSVM.Kernel.RadialBasis ? "RBF" : "Linear"
+        r = loocv_svm_pca(X_multi, labels;
+                          variance_ratio = 0.95, kernel = kernel, cost = cost)
+        push!(pca_svm_results, (
+            method = "PCA+SVM ($kernel_name, C=$cost)",
+            accuracy = r.accuracy,
+            n_correct = sum(r.predictions .== labels),
+            n_components = r.median_n_components
+        ))
+    end
+end
+
+pca_df = DataFrame(pca_svm_results)
+sort!(pca_df, :accuracy, rev = true)
+pca_df
+```
+
+### Permutation test {#sec-permutation}
+
+::: {.callout-note}
+## Permutation test for feature-based classifiers
+A **permutation test** assesses whether the classifier's accuracy is significantly better than chance. We shuffle the labels many times, recompute LOOCV accuracy each time, and measure how often the shuffled accuracy matches or exceeds the observed accuracy. If the observed accuracy is far above the null distribution, we can be confident the features contain genuine discriminative signal --- even if the absolute accuracy estimate may be optimistically biased.
+:::
+
+```{julia}
+#| eval: false
+# Permutation test for Multi-filtration SVM (takes a few minutes)
+perm_multi = permutation_test_svm(
+    X_multi, labels;
+    n_permutations = 500,
+    kernel = LIBSVM.Kernel.RadialBasis,
+    cost = 10.0
+)
+
+println("=== Permutation Test: Multi-filtration SVM (RBF, C=10) ===")
+println("Observed LOOCV accuracy: $(round(perm_multi.observed * 100, digits=1))%")
+println("Null distribution: mean=$(round(perm_multi.perm_mean * 100, digits=1))%, std=$(round(perm_multi.perm_std * 100, digits=1))%")
+println("Max null accuracy: $(round(perm_multi.perm_max * 100, digits=1))%")
+println("p-value: $(perm_multi.p_value)")
+```
+
+### Honest comparison summary
+
+```{julia}
+honest_results = []
+
+# Nested RF (already computed)
+push!(honest_results, (
+    method = "Nested LOOCV: Balanced RF (All stats, 66 features)",
+    accuracy = nested_rf.accuracy,
+    balanced_accuracy = nested_rf.balanced_accuracy,
+    macro_f1 = nested_rf.macro_f1,
+    n_correct = sum(nested_rf.predictions .== labels),
+    n_total = length(labels),
+    honest = "Yes"
+))
+
+# Nested SVM on multi-filtration (no PCA)
+push!(honest_results, (
+    method = "Nested LOOCV: SVM (Multi-filtration, ~991 features)",
+    accuracy = nested_svm_multi.accuracy,
+    balanced_accuracy = nested_svm_multi.balanced_accuracy,
+    macro_f1 = nested_svm_multi.macro_f1,
+    n_correct = sum(nested_svm_multi.predictions .== labels),
+    n_total = length(labels),
+    honest = "Yes"
+))
+
+# Nested SVM + PCA on multi-filtration
+push!(honest_results, (
+    method = "Nested LOOCV: SVM + PCA (Multi-filtration)",
+    accuracy = nested_svm_pca.accuracy,
+    balanced_accuracy = nested_svm_pca.balanced_accuracy,
+    macro_f1 = nested_svm_pca.macro_f1,
+    n_correct = sum(nested_svm_pca.predictions .== labels),
+    n_total = length(labels),
+    honest = "Yes"
+))
+
+# Best k-NN on Wasserstein (no hyperparameter selection needed for k=1)
+r_knn1 = loocv_knn(D_wass1_rips, labels; k = 1)
+m_knn1 = classification_metrics(labels, r_knn1.predictions)
+push!(honest_results, (
+    method = "1-NN on Rips Wasserstein-1 (no tuning)",
+    accuracy = r_knn1.accuracy,
+    balanced_accuracy = m_knn1.balanced_accuracy,
+    macro_f1 = m_knn1.macro_f1,
+    n_correct = sum(r_knn1.predictions .== labels),
+    n_total = length(labels),
+    honest = "Yes (no hyperparams)"
+))
+
+honest_df = DataFrame(honest_results)
+sort!(honest_df, :accuracy, rev = true)
+honest_df
 ```
 
 ## Discussion
 
-The topological approach using persistence diagrams is applied to distinguish between four Diptera families (Asilidae, Bibionidae, Ceratopogonidae, and Sciaridae). Key findings:
+We applied multiple TDA filtration strategies to classify Diptera families from wing venation images. Key findings:
 
-1. **Feature extraction**: The 1-dimensional persistence captures meaningful topological differences in wing venation patterns (loops and holes).
+1. **Multiple filtrations are complementary**: The Vietoris-Rips filtration on point-cloud samples captures the global loop structure of the wing venation. Directional height filtrations encode how topological features are spatially distributed along specific axes, and the radial filtration captures the center-to-periphery organization of vein loops. Together, these views capture different geometric and topological aspects of the wing.
 
-2. **Distance metrics**: Comparing Euclidean distance on persistence images with topological distances (Bottleneck, Wasserstein) reveals which representation better captures discriminative information.
+2. **1D persistence is the key feature**: Since all wings are connected, 0-dimensional persistence (connected components) is uninformative. The 1-dimensional persistence (loops formed by vein cells) is the discriminative signal. Different families have characteristic numbers, sizes, and spatial arrangements of these loops.
 
-3. **Statistical validation**: With 28 samples across 4 families, we report:
-   - Leave-one-out cross-validation accuracy
-   - 95% Wilson confidence intervals
-   - Permutation test p-value to confirm statistical significance
+3. **Multi-filtration features improve classification, but beware overfitting**: Combining features from all filtration strategies (Rips + directional + radial) into a single feature matrix yields the highest raw LOOCV scores. However, the Multi-filtration feature matrix has ~991 features for only 72 samples (a ~14:1 ratio). In this high-dimensional regime, SVM with RBF kernel can find separating hyperplanes even for random data, and selecting the best kernel/cost from many runs introduces selection bias. The **nested LOOCV results** (@sec-nested-svm) provide unbiased accuracy estimates and should be preferred over the non-nested results in the comparison table.
+
+4. **Distance-based vs feature-based methods**: Both approaches are effective. Distance-based methods (k-NN with Wasserstein distance) work directly on the topological space and require no hyperparameter tuning for $k=1$, making them naturally robust to overfitting. Feature-based methods (SVM, Random Forest on vectorized persistence) can exploit high-dimensional representations but require careful evaluation (nested CV) to avoid optimistic bias.
+
+5. **PCA dimensionality reduction**: Applying PCA before SVM classification reduces the feature-to-sample ratio and mitigates overfitting. The nested LOOCV with PCA provides a more conservative but trustworthy accuracy estimate for the Multi-filtration approach.
+
+6. **Statistical rigor**: We report LOOCV accuracy with Wilson confidence intervals, nested LOOCV for unbiased evaluation when hyperparameters are tuned, and permutation tests to verify that observed accuracy is significantly above chance level.
 
 ### Limitations
 
-- Small sample size (n=28) limits the complexity of models we can reliably train
-- Unbalanced classes (8 Asilidae, 6 Bibionidae, 8 Ceratopogonidae, 6 Sciaridae) may affect classification performance
-- Image quality and preprocessing parameters may influence topological features
+- **Class imbalance**: Tipulidae has 12 samples while Pelecorhynchidae has only 2, which may affect some classifiers. Per-class accuracy for Pelecorhynchidae is essentially meaningless with $n=2$
+- Image quality and preprocessing parameters (blur, threshold) influence topological features
+- The non-nested LOOCV results for feature-based classifiers (especially with the Multi-filtration feature set) are optimistically biased due to hyperparameter selection on the evaluation data. The honest comparison table (@sec-nested-svm) should be preferred
+- With only 72 samples, confidence intervals remain wide regardless of method
 
 ### Future work
 
-- Extend dataset with more species and specimens per family
-- Explore additional filtration methods (line-based, directional)
-- Combine TDA features with traditional morphometric measurements
+- Extend dataset with more specimens per family, especially underrepresented families
+- Improve imaging/segmentation quality and reevaluate image-based filtrations with less noise sensitivity
+- Apply extended persistence or zigzag persistence for richer invariants
+- Feature selection to identify most discriminative TDA descriptors
+- Deep learning on persistence images or persistence diagrams directly

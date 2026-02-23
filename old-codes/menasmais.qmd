@@ -1,0 +1,193 @@
+---
+title: "Untitled"
+format: html
+execute: 
+  include: false
+---
+
+
+```{julia}
+using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
+using Images: mosaicview
+using Plots: plot, display, heatmap, scatter
+using PersistenceDiagrams
+```
+
+--- Necessary functions, needs to be put in the right place ---
+
+```{julia}
+# find the center of the image
+function map_the_center(img::Matrix; threshold = 0.5)
+    A = image_to_array(img)
+    ids = findall_ids(>(threshold), A)
+    x, y = extrema(first.(ids)), extrema(last.(ids))
+    (x[1] + x[2]) / 2, (y[1] + y[2]) / 2
+end
+```
+
+```{julia}
+# array manipulation
+function modify_array2(A, f::Function)
+    ids = findall_ids(>(0.3), A)
+    A2 = zero(A)
+    A3 = zero(A)
+    for (x, y) in ids
+        A2[x, y] = f(x, y)
+    end
+    mina2 = minimum(A2)
+    for (x, y) in ids
+        A3[x, y] = f(x, y)  - mina2
+    end
+    # A3[ids] = A2[ids] .- minimum(A2)
+    A3 .+ mina2
+end
+```
+```{julia}
+function filt_pt_line( (cost, sint), (centerx, centery))
+    function (x, y)
+        x2, y2 = x-centerx, y - centery
+    #    x2, y2 = a1 - 450, b1 - 75
+        (P1, P2) = (x2*cost .+ y2*sint).*(cost, sint)
+        Signal = sign(P1*cost + P2*sint)
+        sqrt((P1)^2 .+ (P2)^2)*Signal
+    end
+end
+```
+
+
+### Load images and convert to point clouds
+
+```{julia}
+paths = readdir("C:/Users/SergioNote/JTDA/tda-fly/images/processed", join = true)
+# print(paths)
+species = basename.(paths) .|> (x -> replace(x, ".png" => ""))
+individuals = map(species) do specie
+  s = split(specie, " ")
+  s[1][1] * "-" * s[2]
+end
+wings = load_wing.(paths, blur = 1.3)
+Xs = map(image_to_r2, wings);
+```
+
+--- center of the images ---
+```{julia}
+Centers = map(map_the_center, wings);
+```
+
+
+
+### Sampling points
+
+We select 500 points from each image using a farthest point sample method
+
+<!-- ```{julia}
+samples = map(Xs) do X
+  ids = farthest_points_sample(X, 500)
+  X[ids]
+end;
+``` -->
+
+and create an empty dictionary to store all computations
+
+```{julia}
+simple_rips_dc = Dict();
+```
+
+
+--- number of directions ---
+```{julia} 
+NDIRECTIONS = 20
+angles = [n*pi/(NDIRECTIONS/2) for n in 1:NDIRECTIONS]
+# angles = range(0, stop=2*pi, length=NDIRECTIONS+1)[1:end-1]
+directions = [(cos(x), sin(x)) for x in angles];
+```
+
+--- compute PHTs ---
+
+###  single direction ####################
+
+```{julia}
+point_rips_dc = Dict()
+
+point_rips_dc["PD"] = map(wings) do wing
+  A = wing |> image_to_array;
+  center = map_the_center(wing)
+  f = filt_pt_line(directions[20], center)
+  Af = modify_array2(A, f)
+  point_pds = cubical_pd(Af, cutoff = 0.05)[2]
+end;
+
+PI = PersistenceImage(point_rips_dc["PD"], size = (10, 10))
+point_rips_dc["PI"] = PI.(point_rips_dc["PD"]);
+```
+
+```{julia}
+final_dc = Dict();
+final_dc["PI"] = point_rips_dc["PI"];
+```
+
+```{julia}
+final_dc["Distance_matrix"] = pairwise_distance(final_dc["PI"]);
+```
+
+```{julia}
+plot_heatmap(
+  final_dc["Distance_matrix"], 
+  individuals, 
+  "Distance matrix for point-based barcodes with one directional filtration"
+) 
+```
+
+
+###  multiple directions ####################
+
+```{julia}
+point_rips_dc = Dict()
+point_pht_dc = Dict()
+
+point_pht_dc["PD"] = map(directions) do dir
+  println("Processing direction: ", dir)
+  point_rips_dc["PD"] = map(wings) do wing
+    A = wing |> image_to_array;
+    center = map_the_center(wing)
+    f = filt_pt_line(dir, center)
+    Af = modify_array2(A, f)
+    point_pds = cubical_pd(Af, cutoff = 0.05)[2]
+  end;
+  PI = PersistenceImage(point_rips_dc["PD"], size = (10, 10))
+  point_rips_dc["PI"] = PI.(point_rips_dc["PD"]);
+  point_pht_dc[string(dir)] =  point_rips_dc["PI"]
+end;
+```
+
+```{julia}
+final_pht_dc = Dict();
+for dir in directions
+  dir_str = string(dir)
+  if !haskey(final_pht_dc, "PI")
+    final_pht_dc["PI"] = point_pht_dc[dir_str]
+  else
+    final_pht_dc["PI"] += point_pht_dc[dir_str]
+  end
+end
+```
+
+
+
+```{julia}
+final_dc = Dict();
+
+final_dc["PI"] = final_pht_dc["PI"];
+```
+
+```{julia}
+final_dc["Distance_matrix"] = pairwise_distance(final_dc["PI"]);
+```
+
+```{julia}
+plot_heatmap(
+  final_dc["Distance_matrix"], 
+  individuals, 
+  "Distance matrix for directional filtration"
+)
+```
