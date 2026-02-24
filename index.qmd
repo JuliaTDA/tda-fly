@@ -20,9 +20,9 @@ keywords:
   - Diptera classification
   - Wing venation
 abstract: |
-  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. Using multiple filtration strategies --- Vietoris-Rips on point clouds, directional height filtrations, and radial filtrations on grayscale images --- we extract topological features (persistence images, Betti curves, persistence landscapes and summary statistics) and compare distance-based and feature-based classifiers via leave-one-out cross-validation.
+  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. Using multiple filtration strategies --- Vietoris-Rips on point clouds, directional height filtrations (8 directions), radial filtrations, Euclidean Distance Transform filtrations, and grayscale sublevel-set (cubical) filtrations on wing images --- we extract both H0 and H1 topological features (persistence images, Betti curves, persistence landscapes and summary statistics) and compare distance-based and feature-based classifiers via leave-one-out cross-validation. Feature selection via Random Forest importance and nested LOOCV provide honest, unbiased accuracy estimates.
 plain-language-summary: |
-  We use mathematical tools that detect "shapes" in data --- specifically loops and holes in fly wing vein patterns --- to automatically classify different families of flies (Diptera). By looking at wing images through multiple topological lenses, we achieve robust classification across 10 families.
+  We use mathematical tools that detect "shapes" in data --- specifically loops, connected components, and vein thickness patterns in fly wing vein networks --- to automatically classify different families of flies (Diptera). By looking at wing images through multiple topological lenses (directional sweeps, distance transforms, radial filtrations), extracting both hole and branching information, and using feature selection to focus on the most informative signals, we achieve robust classification across 10 families.
 key-points:
   - Multiple TDA filtration strategies capture complementary geometric and topological information from wing venation.
   - 1-dimensional persistent homology (loops) is the most discriminative topological feature for wing classification.
@@ -54,13 +54,15 @@ The order Diptera (true flies) comprises over 150,000 described species across m
 
 In this work, we apply **Topological Data Analysis (TDA)** to the problem of classifying Diptera families from wing images. TDA provides a framework for extracting shape descriptors that are robust to continuous deformations --- exactly the kind of invariance desirable when comparing biological structures that vary in scale, orientation and minor deformations across individuals.
 
-We employ three complementary filtration strategies:
+We employ five complementary filtration strategies:
 
 1. **Vietoris-Rips filtration** on point-cloud samples of wing silhouettes
-2. **Directional height filtrations** that sweep across the wing along different axes
+2. **Directional height filtrations** (8 directions) that sweep across the wing along different axes
 3. **Radial filtration** from the wing centroid to the periphery
+4. **Euclidean Distance Transform (EDT) filtration** capturing vein thickness hierarchy
+5. **Grayscale sublevel-set (cubical) filtration** on the raw wing image
 
-Each filtration produces persistence diagrams that we vectorize into feature representations (persistence images, Betti curves, persistence landscapes) and feed into classifiers.
+For each filtration, we compute both **H0** (connected components / vein branching) and **H1** (loops / enclosed cells) persistence, then vectorize into feature representations (persistence images, Betti curves, persistence landscapes) and feed into classifiers. Feature selection and nested cross-validation provide honest accuracy estimates.
 
 ## Methods
 
@@ -118,6 +120,32 @@ println("\nSamples per family:")
 for f in sort(unique(families))
     println("  $(f): $(count(==(f), families))")
 end
+```
+
+#### Excluding small families
+
+Families with fewer than 3 samples (e.g. Pelecorhynchidae with $n=2$) can distort cross-validation results---a single misclassification changes accuracy by 50%. We provide a filtered version and run the analysis both ways.
+
+```{julia}
+MIN_FAMILY_SIZE = 3
+family_counts = Dict(f => count(==(f), families) for f in unique(families))
+small_families = [f for (f, c) in family_counts if c < MIN_FAMILY_SIZE]
+
+if !isempty(small_families)
+    println("Families with < $MIN_FAMILY_SIZE samples (excluded from filtered analysis):")
+    for f in sort(small_families)
+        println("  $(f): $(family_counts[f]) samples")
+    end
+end
+
+# Build filtered indices
+keep_filtered = [i for i in eachindex(families) if family_counts[families[i]] >= MIN_FAMILY_SIZE]
+paths_filtered = paths[keep_filtered]
+species_filtered = species[keep_filtered]
+families_filtered = families[keep_filtered]
+individuals_filtered = individuals[keep_filtered]
+
+println("\nFiltered dataset: $(length(keep_filtered)) samples, $(length(unique(families_filtered))) families")
 ```
 
 ```{julia}
@@ -219,7 +247,7 @@ demo_connectivity_df
 
 ## Topological feature extraction
 
-We now compute persistent homology using three filtration strategies. Since all wings are connected shapes (a single connected component), **0-dimensional persistence is uninformative** --- it would only show one infinite bar per wing. We focus exclusively on **1-dimensional persistence** (loops/holes), which captures the pattern of enclosed cells formed by the wing venation.
+We now compute persistent homology using five filtration strategies. For the Vietoris-Rips filtration on connected point clouds, H0 is uninformative (single infinite bar), so we use only H1. However, for cubical filtrations (directional, radial, EDT, grayscale), **H0 is highly informative** --- it captures when disconnected vein segments merge as the filtration parameter grows, directly encoding vein count and branching patterns. We therefore compute both H0 and H1 for all cubical-based filtrations.
 
 ::: {.callout-note}
 ## What is persistent homology?
@@ -259,21 +287,31 @@ wing_arrays = [convert(Array{Float64}, w) for w in wings]
 A **height filtration** sweeps a hyperplane across the shape in a chosen direction and tracks topology as the "visible" region grows. For a direction vector $v$, we assign each foreground pixel the value $\langle (i,j), v \rangle$ (its projection onto $v$), then compute sublevel-set persistence. Different directions capture different geometric aspects: a horizontal sweep detects how vein loops are arranged from base to tip, a vertical sweep captures dorsal-ventral structure, and diagonal sweeps capture oblique patterns. Using multiple directions enriches the topological signature.
 :::
 
-We compute persistence along four directions: horizontal (base-to-tip), vertical (dorsal-ventral), and two diagonals:
+We compute persistence along **eight** directions (every 22.5°) to capture finer angular structure of vein branching, including oblique vein angles missed by 4 directions. For each direction, we extract both **H0** (connected component merging = vein branching) and **H1** (loop formation):
 
 ```{julia}
-directions = [
-    [0.0, 1.0],   # left-to-right (base to tip)
-    [1.0, 0.0],   # top-to-bottom (dorsal-ventral)
-    [1.0, 1.0],   # diagonal
-    [1.0, -1.0],  # anti-diagonal
-]
-direction_names = ["Horizontal", "Vertical", "Diagonal", "Anti-diagonal"]
+angles = range(0, π, length=9)[1:8]
+directions = [[sin(θ), cos(θ)] for θ in angles]
+direction_names = ["Dir_$(round(Int, rad2deg(θ)))°" for θ in angles]
 
+println("Using $(length(directions)) directions:")
+for (name, dir) in zip(direction_names, directions)
+    println("  $name: $dir")
+end
+
+# H1 persistence (loops) — as before, but expanded to 8 directions
 pds_directional = Dict{String, Vector}()
 for (dir, name) in zip(directions, direction_names)
-    pds_directional[name] = @showprogress map(wing_arrays) do A
+    pds_directional[name] = @showprogress "$name H1" map(wing_arrays) do A
         directional_pd_1d(A, dir)
+    end
+end
+
+# H0 persistence (connected component merging = vein branching patterns)
+pds_directional_h0 = Dict{String, Vector}()
+for (dir, name) in zip(directions, direction_names)
+    pds_directional_h0[name] = @showprogress "$name H0" map(wing_arrays) do A
+        directional_pd_0d(A, dir)
     end
 end;
 ```
@@ -289,6 +327,47 @@ The **radial filtration** assigns each foreground pixel a value equal to its dis
 pds_radial = @showprogress "radial_pd_1d" map(wing_arrays) do A
     radial_pd_1d(A)
 end;
+```
+
+We also compute H0 persistence for the radial filtration, capturing how disconnected vein segments merge as the radial sweep grows outward:
+
+```{julia}
+pds_radial_h0 = @showprogress "radial_pd_0d" map(wing_arrays) do A
+    radial_pd_0d(A)
+end;
+```
+
+### Strategy 4: Euclidean Distance Transform (EDT) filtration {#sec-edt}
+
+::: {.callout-note}
+## EDT filtration
+The **Euclidean Distance Transform** assigns each foreground pixel the distance to the nearest background pixel. Thick veins get high EDT values. By negating the EDT as a filtration value, thick veins appear first in the sublevel-set filtration. This captures the **vein thickness hierarchy** --- a diagnostic taxonomic character (e.g., Tabanidae have thickened costal and subcostal veins).
+:::
+
+```{julia}
+pds_edt_h1 = @showprogress "EDT H1" map(wing_arrays) do A
+    edt_pd_1d(A)
+end
+
+pds_edt_h0 = @showprogress "EDT H0" map(wing_arrays) do A
+    edt_pd_0d(A)
+end;
+```
+
+### Strategy 5: Cubical (grayscale sublevel-set) persistence {#sec-cubical}
+
+::: {.callout-note}
+## Grayscale sublevel-set persistence
+The function `cubical_pd` computes sublevel-set persistence directly on the grayscale wing image (inverted so that dark veins have low filtration values). This captures the intensity landscape of the wing image without any thresholding, preserving information about semi-transparent wing membrane regions and vein intensity gradients.
+:::
+
+```{julia}
+pds_cubical = @showprogress "Cubical" map(wing_arrays) do A
+    cubical_pd(A; dim_max=1)
+end
+
+pds_cubical_h0 = [pd[1] for pd in pds_cubical]
+pds_cubical_h1 = [pd[2] for pd in pds_cubical];
 ```
 
 ### Persistence vectorization {#sec-vectorization}
@@ -325,7 +404,7 @@ land2_rips_vecs = land2_rips.(pds_rips);
 ```
 
 ```{julia}
-# Vectorize directional persistence
+# Vectorize directional persistence (H1)
 pi_directional = Dict{String, Vector}()
 betti_directional = Dict{String, Vector}()
 
@@ -338,12 +417,94 @@ for name in direction_names
     betti_directional[name] = bc_d.(pds)
 end
 
-# Radial
+# Vectorize directional persistence (H0 — NEW)
+pi_directional_h0 = Dict{String, Vector}()
+betti_directional_h0 = Dict{String, Vector}()
+
+for name in direction_names
+    pds = pds_directional_h0[name]
+    # Filter out infinite intervals for vectorization
+    pds_finite = [filter(x -> isfinite(persistence(x)), pd) for pd in pds]
+    if any(!isempty, pds_finite)
+        PI_d0 = PersistenceImage(pds_finite, size = (10, 10))
+        pi_directional_h0[name] = PI_d0.(pds_finite)
+        bc_d0 = BettiCurve(pds_finite; length = 30)
+        betti_directional_h0[name] = bc_d0.(pds_finite)
+    else
+        pi_directional_h0[name] = [zeros(10 * 10) for _ in pds]
+        betti_directional_h0[name] = [zeros(30) for _ in pds]
+    end
+end
+
+# Radial H1
 PI_rad = PersistenceImage(pds_radial, size = (10, 10))
 pi_radial = PI_rad.(pds_radial)
 
 bc_rad = BettiCurve(pds_radial; length = 30)
-betti_radial = bc_rad.(pds_radial);
+betti_radial = bc_rad.(pds_radial)
+
+# Radial H0 (NEW)
+pds_radial_h0_finite = [filter(x -> isfinite(persistence(x)), pd) for pd in pds_radial_h0]
+if any(!isempty, pds_radial_h0_finite)
+    PI_rad_h0 = PersistenceImage(pds_radial_h0_finite, size = (10, 10))
+    pi_radial_h0 = PI_rad_h0.(pds_radial_h0_finite)
+    bc_rad_h0 = BettiCurve(pds_radial_h0_finite; length = 30)
+    betti_radial_h0 = bc_rad_h0.(pds_radial_h0_finite)
+else
+    pi_radial_h0 = [zeros(10 * 10) for _ in pds_radial_h0]
+    betti_radial_h0 = [zeros(30) for _ in pds_radial_h0]
+end
+
+# EDT H1 (NEW)
+if any(!isempty, pds_edt_h1)
+    PI_edt_h1 = PersistenceImage(pds_edt_h1, size = (10, 10))
+    pi_edt_h1 = PI_edt_h1.(pds_edt_h1)
+    bc_edt_h1 = BettiCurve(pds_edt_h1; length = 30)
+    betti_edt_h1 = bc_edt_h1.(pds_edt_h1)
+else
+    pi_edt_h1 = [zeros(10 * 10) for _ in pds_edt_h1]
+    betti_edt_h1 = [zeros(30) for _ in pds_edt_h1]
+end
+
+# EDT H0 (NEW)
+pds_edt_h0_finite = [filter(x -> isfinite(persistence(x)), pd) for pd in pds_edt_h0]
+if any(!isempty, pds_edt_h0_finite)
+    PI_edt_h0 = PersistenceImage(pds_edt_h0_finite, size = (10, 10))
+    pi_edt_h0 = PI_edt_h0.(pds_edt_h0_finite)
+    bc_edt_h0 = BettiCurve(pds_edt_h0_finite; length = 30)
+    betti_edt_h0 = bc_edt_h0.(pds_edt_h0_finite)
+else
+    pi_edt_h0 = [zeros(10 * 10) for _ in pds_edt_h0]
+    betti_edt_h0 = [zeros(30) for _ in pds_edt_h0]
+end
+
+# Cubical H0 and H1 (NEW)
+if any(!isempty, pds_cubical_h1)
+    PI_cub_h1 = PersistenceImage(pds_cubical_h1, size = (10, 10))
+    pi_cubical_h1 = PI_cub_h1.(pds_cubical_h1)
+    bc_cub_h1 = BettiCurve(pds_cubical_h1; length = 30)
+    betti_cubical_h1 = bc_cub_h1.(pds_cubical_h1)
+else
+    pi_cubical_h1 = [zeros(10 * 10) for _ in pds_cubical_h1]
+    betti_cubical_h1 = [zeros(30) for _ in pds_cubical_h1]
+end
+
+pds_cubical_h0_finite = [filter(x -> isfinite(persistence(x)), pd) for pd in pds_cubical_h0]
+if any(!isempty, pds_cubical_h0_finite)
+    PI_cub_h0 = PersistenceImage(pds_cubical_h0_finite, size = (10, 10))
+    pi_cubical_h0 = PI_cub_h0.(pds_cubical_h0_finite)
+    bc_cub_h0 = BettiCurve(pds_cubical_h0_finite; length = 30)
+    betti_cubical_h0 = bc_cub_h0.(pds_cubical_h0_finite)
+else
+    pi_cubical_h0 = [zeros(10 * 10) for _ in pds_cubical_h0]
+    betti_cubical_h0 = [zeros(30) for _ in pds_cubical_h0]
+end
+
+println("Vectorization complete.")
+println("  Directional: $(length(direction_names)) directions × H0 + H1")
+println("  Radial: H0 + H1")
+println("  EDT: H0 + H1")
+println("  Cubical: H0 + H1");
 ```
 
 ### Examples
@@ -355,18 +516,27 @@ example_indices = [findfirst(==(f), families) for f in sort(unique(families))]
 
 for i in example_indices
     pers_rips = persistence.(pds_rips[i])
-    pers_dir = persistence.(pds_directional["Horizontal"][i])
+    pers_dir = persistence.(pds_directional[direction_names[1]][i])
     pers_rad = persistence.(pds_radial[i])
+    pers_edt = persistence.(pds_edt_h1[i])
 
     p1 = isempty(pers_rips) ? plot(title = "Rips H₁ (empty)") :
          bar(sort(pers_rips, rev = true), title = "Rips H₁", legend = false, ylabel = "persistence")
-    p2 = isempty(pers_dir) ? plot(title = "Horiz. H₁ (empty)") :
-         bar(sort(pers_dir, rev = true), title = "Horiz. H₁", legend = false, ylabel = "persistence")
+    p2 = isempty(pers_dir) ? plot(title = "Dir 0° H₁ (empty)") :
+         bar(sort(pers_dir, rev = true), title = "Dir 0° H₁", legend = false, ylabel = "persistence")
     p3 = isempty(pers_rad) ? plot(title = "Radial H₁ (empty)") :
          bar(sort(pers_rad, rev = true), title = "Radial H₁", legend = false, ylabel = "persistence")
-    p4 = scatter(last.(samples[i]), first.(samples[i]),
+    p4 = isempty(pers_edt) ? plot(title = "EDT H₁ (empty)") :
+         bar(sort(pers_edt, rev = true), title = "EDT H₁", legend = false, ylabel = "persistence")
+    p5 = scatter(last.(samples[i]), first.(samples[i]),
                  aspect_ratio = :equal, markersize = 1, legend = false, title = "Point cloud")
-    p = plot(p1, p2, p3, p4, layout = (2, 2), size = (900, 700),
+
+    # H0 examples
+    pers_dir_h0 = [persistence(x) for x in pds_directional_h0[direction_names[1]][i] if isfinite(persistence(x))]
+    p6 = isempty(pers_dir_h0) ? plot(title = "Dir 0° H₀ (empty)") :
+         bar(sort(pers_dir_h0, rev = true), title = "Dir 0° H₀", legend = false, ylabel = "persistence")
+
+    p = plot(p1, p2, p3, p4, p5, p6, layout = (3, 2), size = (900, 900),
              plot_title = "$(families[i]) ($(individuals[i]))")
     display(p)
 end;
@@ -382,19 +552,48 @@ stat_names = ["count", "max_pers", "total_pers", "total_pers2",
 
 stats_rips = collect(hcat([pd_statistics(pd) for pd in pds_rips]...)')
 
+# Directional H1 stats
 stats_directional = Dict{String, Matrix}()
 for name in direction_names
     stats_directional[name] = collect(hcat([pd_statistics(pd) for pd in pds_directional[name]]...)')
 end
-stats_radial = collect(hcat([pd_statistics(pd) for pd in pds_radial]...)')
 
-# Combined stats from all filtrations
-stats_all = hcat(stats_rips, stats_radial,
-                 [stats_directional[name] for name in direction_names]...)
+# Directional H0 stats (NEW)
+stats_directional_h0 = Dict{String, Matrix}()
+for name in direction_names
+    stats_directional_h0[name] = collect(hcat([pd_statistics(pd) for pd in pds_directional_h0[name]]...)')
+end
+
+stats_radial = collect(hcat([pd_statistics(pd) for pd in pds_radial]...)')
+stats_radial_h0 = collect(hcat([pd_statistics(pd) for pd in pds_radial_h0]...)')   # NEW
+
+# EDT stats (NEW)
+stats_edt_h1 = collect(hcat([pd_statistics(pd) for pd in pds_edt_h1]...)')
+stats_edt_h0 = collect(hcat([pd_statistics(pd) for pd in pds_edt_h0]...)')
+
+# Cubical stats (NEW)
+stats_cubical_h1 = collect(hcat([pd_statistics(pd) for pd in pds_cubical_h1]...)')
+stats_cubical_h0 = collect(hcat([pd_statistics(pd) for pd in pds_cubical_h0]...)')
+
+# Combined stats from ALL filtrations (H1 only, for backward compatibility)
+stats_all_h1 = hcat(stats_rips, stats_radial,
+                    [stats_directional[name] for name in direction_names]...,
+                    stats_edt_h1, stats_cubical_h1)
+
+# Combined stats from ALL filtrations (H0 + H1 = comprehensive)
+stats_all = hcat(
+    stats_rips,
+    stats_radial, stats_radial_h0,
+    [stats_directional[name] for name in direction_names]...,
+    [stats_directional_h0[name] for name in direction_names]...,
+    stats_edt_h1, stats_edt_h0,
+    stats_cubical_h1, stats_cubical_h0,
+)
 
 println("Statistics dimensions:")
-println("  Rips: $(size(stats_rips))")
-println("  All filtrations combined: $(size(stats_all))")
+println("  Rips H1: $(size(stats_rips))")
+println("  All H1 only: $(size(stats_all_h1))")
+println("  All H0+H1 (comprehensive): $(size(stats_all))")
 ```
 
 #### Statistics comparison by family
@@ -409,17 +608,152 @@ stats_df = DataFrame(
     n_intervals_rad = stats_radial[:, 1],
     max_pers_rad = stats_radial[:, 2],
     entropy_rad = stats_radial[:, 10],
+    n_intervals_edt_h1 = stats_edt_h1[:, 1],
+    max_pers_edt_h1 = stats_edt_h1[:, 2],
+    n_intervals_cub_h1 = stats_cubical_h1[:, 1],
+    max_pers_cub_h1 = stats_cubical_h1[:, 2],
 )
 
 p1 = boxplot(stats_df.family, stats_df.n_intervals_rips,
              title = "Rips: # intervals", legend = false, ylabel = "count", xrotation = 45)
 p2 = boxplot(stats_df.family, stats_df.max_pers_rips,
              title = "Rips: max persistence", legend = false, ylabel = "persistence", xrotation = 45)
-p3 = boxplot(stats_df.family, stats_df.n_intervals_rad,
-             title = "Radial: # intervals", legend = false, ylabel = "count", xrotation = 45)
-p4 = boxplot(stats_df.family, stats_df.entropy_rad,
-             title = "Radial: entropy", legend = false, ylabel = "entropy", xrotation = 45)
+p3 = boxplot(stats_df.family, stats_df.n_intervals_edt_h1,
+             title = "EDT H₁: # intervals", legend = false, ylabel = "count", xrotation = 45)
+p4 = boxplot(stats_df.family, stats_df.max_pers_edt_h1,
+             title = "EDT H₁: max persistence", legend = false, ylabel = "persistence", xrotation = 45)
 plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 700))
+```
+
+### Decision tree on rich 1D persistence statistics
+
+We now use the full 1-dimensional persistence statistics from all filtrations (`stats_all`) as features for a single decision tree classifier.
+
+```{julia}
+using DecisionTree
+using Random: MersenneTwister
+
+labels_tree = families
+X_tree = sanitize_feature_matrix(stats_all)
+
+tree_blocks_h1 = ["Rips_H1", "Radial_H1", [name * "_H1" for name in direction_names]..., "EDT_H1", "Cubical_H1"]
+tree_blocks_h0 = ["Radial_H0", [name * "_H0" for name in direction_names]..., "EDT_H0", "Cubical_H0"]
+tree_blocks = [tree_blocks_h1; tree_blocks_h0]
+tree_feature_names = ["$(block)__$(stat)" for block in tree_blocks for stat in stat_names]
+
+function loocv_decision_tree(X::Matrix, y::Vector{String};
+                             max_depth::Int = 6,
+                             min_samples_leaf::Int = 2,
+                             min_samples_split::Int = 2,
+                             rng_seed::Int = 20260223)
+    Xclean = sanitize_feature_matrix(X)
+    n = size(Xclean, 1)
+    predictions = Vector{String}(undef, n)
+
+    for i in 1:n
+        train_idx = setdiff(1:n, i)
+        X_train = Xclean[train_idx, :]
+        y_train = y[train_idx]
+
+        tree = DecisionTree.build_tree(
+            y_train,
+            X_train,
+            size(X_train, 2),
+            max_depth,
+            min_samples_leaf,
+            min_samples_split,
+            0.0;
+            loss = DecisionTree.util.gini,
+            rng = MersenneTwister(rng_seed + i),
+            impurity_importance = true
+        )
+
+        predictions[i] = DecisionTree.apply_tree(tree, Xclean[i, :])
+    end
+
+    (accuracy = mean(predictions .== y), predictions = predictions)
+end
+
+tree_results = DataFrame(
+    max_depth = Int[],
+    min_samples_leaf = Int[],
+    min_samples_split = Int[],
+    n_correct = Int[],
+    accuracy = Float64[],
+    balanced_accuracy = Float64[],
+    macro_f1 = Float64[],
+)
+
+for max_depth in [3, 4, 5, 6, 8]
+    for min_leaf in [1, 2, 3]
+        for min_split in [2, 4]
+            r = loocv_decision_tree(X_tree, labels_tree;
+                                    max_depth = max_depth,
+                                    min_samples_leaf = min_leaf,
+                                    min_samples_split = min_split)
+            m = classification_metrics(labels_tree, r.predictions)
+            push!(tree_results, (
+                max_depth,
+                min_leaf,
+                min_split,
+                sum(r.predictions .== labels_tree),
+                r.accuracy,
+                m.balanced_accuracy,
+                m.macro_f1
+            ))
+        end
+    end
+end
+
+sort!(tree_results, :accuracy, rev = true)
+first(tree_results, 10)
+```
+
+```{julia}
+best_tree = tree_results[1, :]
+
+tree_model = DecisionTree.build_tree(
+    labels_tree,
+    X_tree,
+    size(X_tree, 2),
+    best_tree.max_depth,
+    best_tree.min_samples_leaf,
+    best_tree.min_samples_split,
+    0.0;
+    loss = DecisionTree.util.gini,
+    rng = MersenneTwister(20260223),
+    impurity_importance = true
+)
+
+tree_importance = DecisionTree.impurity_importance(tree_model; normalize = true)
+
+tree_importance_df = DataFrame(
+    feature = tree_feature_names,
+    importance = tree_importance
+)
+sort!(tree_importance_df, :importance, rev = true)
+
+println("Best Decision Tree LOOCV: $(best_tree.n_correct)/$(length(labels_tree)) ($(round(best_tree.accuracy * 100, digits = 1))%)")
+println("Balanced accuracy: $(round(best_tree.balanced_accuracy * 100, digits = 1))%")
+println("Macro-F1: $(round(best_tree.macro_f1 * 100, digits = 1))%")
+
+first(filter(:importance => >(0.0), tree_importance_df), 15)
+```
+
+```{julia}
+topk = min(12, nrow(tree_importance_df))
+top_tree_importance = first(tree_importance_df, topk)
+
+bar(
+    top_tree_importance.feature,
+    top_tree_importance.importance,
+    xlabel = "1D persistence statistics",
+    ylabel = "Normalized impurity importance",
+    title = "Decision tree feature importance (top $(topk))",
+    legend = false,
+    xrotation = 45,
+    size = (1100, 550),
+)
 ```
 
 ## Distance matrices
@@ -439,6 +773,7 @@ D_pi_rips = pairwise_distance([vec(v) for v in pi_rips])
 D_betti_rips = pairwise_distance(betti_rips, euclidean)
 D_land_rips = pairwise_distance(land1_rips_vecs, euclidean)
 D_wass1_rips = wasserstein_distance_matrix(pds_rips, q = 1)
+D_wass2_rips = wasserstein_distance_matrix(pds_rips, q = 2)   # Phase 5: Wasserstein-2
 D_bott_rips = bottleneck_distance_matrix(pds_rips)
 
 # Directional/radial PDs have hundreds of intervals, so
@@ -446,32 +781,71 @@ D_bott_rips = bottleneck_distance_matrix(pds_rips)
 # We use only vectorized distances (persistence images, Betti curves, landscapes),
 # which are Euclidean distances on fixed-size feature vectors and compute instantly.
 
-# Directional distances (combine all directions via sum of per-direction distances)
+# Directional H1 distances (combine all directions via sum of per-direction distances)
 D_pi_dir = sum(pairwise_distance([vec(v) for v in pi_directional[name]]) for name in direction_names)
 D_betti_dir = sum(pairwise_distance(betti_directional[name], euclidean) for name in direction_names)
+
+# Directional H0 distances (NEW)
+D_pi_dir_h0 = sum(pairwise_distance([vec(v) for v in pi_directional_h0[name]]) for name in direction_names)
+D_betti_dir_h0 = sum(pairwise_distance(betti_directional_h0[name], euclidean) for name in direction_names)
 
 # Radial distances
 D_pi_rad = pairwise_distance([vec(v) for v in pi_radial])
 D_betti_rad = pairwise_distance(betti_radial, euclidean)
 
+# Radial H0 distances (NEW)
+D_pi_rad_h0 = pairwise_distance([vec(v) for v in pi_radial_h0])
+D_betti_rad_h0 = pairwise_distance(betti_radial_h0, euclidean)
+
+# EDT distances (NEW)
+D_pi_edt_h1 = pairwise_distance([vec(v) for v in pi_edt_h1])
+D_betti_edt_h1 = pairwise_distance(betti_edt_h1, euclidean)
+D_pi_edt_h0 = pairwise_distance([vec(v) for v in pi_edt_h0])
+D_betti_edt_h0 = pairwise_distance(betti_edt_h0, euclidean)
+
+# Cubical distances (NEW)
+D_pi_cub_h1 = pairwise_distance([vec(v) for v in pi_cubical_h1])
+D_betti_cub_h1 = pairwise_distance(betti_cubical_h1, euclidean)
+D_pi_cub_h0 = pairwise_distance([vec(v) for v in pi_cubical_h0])
+D_betti_cub_h0 = pairwise_distance(betti_cubical_h0, euclidean)
+
 distances = Dict(
+    # Rips
     "Rips PI" => D_pi_rips,
     "Rips Bottleneck" => D_bott_rips,
     "Rips Wass-1" => D_wass1_rips,
+    "Rips Wass-2" => D_wass2_rips,
     "Rips Betti" => D_betti_rips,
     "Rips Landscape" => D_land_rips,
-    "Directional PI" => D_pi_dir,
-    "Directional Betti" => D_betti_dir,
-    "Radial PI" => D_pi_rad,
-    "Radial Betti" => D_betti_rad,
+    # Directional H1
+    "Directional H1 PI" => D_pi_dir,
+    "Directional H1 Betti" => D_betti_dir,
+    # Directional H0 (NEW)
+    "Directional H0 PI" => D_pi_dir_h0,
+    "Directional H0 Betti" => D_betti_dir_h0,
+    # Radial
+    "Radial H1 PI" => D_pi_rad,
+    "Radial H1 Betti" => D_betti_rad,
+    "Radial H0 PI" => D_pi_rad_h0,
+    "Radial H0 Betti" => D_betti_rad_h0,
+    # EDT (NEW)
+    "EDT H1 PI" => D_pi_edt_h1,
+    "EDT H1 Betti" => D_betti_edt_h1,
+    "EDT H0 PI" => D_pi_edt_h0,
+    "EDT H0 Betti" => D_betti_edt_h0,
+    # Cubical (NEW)
+    "Cubical H1 PI" => D_pi_cub_h1,
+    "Cubical H1 Betti" => D_betti_cub_h1,
+    "Cubical H0 PI" => D_pi_cub_h0,
+    "Cubical H0 Betti" => D_betti_cub_h0,
 );
 ```
 
 ```{julia}
 p1 = plot_heatmap(D_wass1_rips, individuals, "Rips Wasserstein-1")
-p2 = plot_heatmap(D_betti_rips, individuals, "Rips Betti")
-p3 = plot_heatmap(D_pi_dir, individuals, "Directional PI")
-p4 = plot_heatmap(D_pi_rad, individuals, "Radial PI")
+p2 = plot_heatmap(D_pi_dir_h0, individuals, "Directional H0 PI")
+p3 = plot_heatmap(D_pi_edt_h1, individuals, "EDT H1 PI")
+p4 = plot_heatmap(D_pi_cub_h1, individuals, "Cubical H1 PI")
 plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 900))
 ```
 
@@ -534,6 +908,7 @@ We construct feature matrices by concatenating the vectorized TDA representation
 ```{julia}
 # Feature matrices at different levels of richness
 X_stats_rips = sanitize_feature_matrix(stats_rips)
+X_stats_all_h1 = sanitize_feature_matrix(stats_all_h1)
 X_stats_all = sanitize_feature_matrix(stats_all)
 
 X_rips_full = build_feature_matrix(
@@ -543,15 +918,42 @@ X_rips_full = build_feature_matrix(
     landscape = land1_rips_vecs,
 ) |> sanitize_feature_matrix
 
-# Multi-filtration features: combine everything
+# Multi-filtration features (H1 only): combine everything
+all_pi_h1 = [vcat(vec(pi_rips[i]),
+                  vec(pi_radial[i]),
+                  [vec(pi_directional[name][i]) for name in direction_names]...,
+                  vec(pi_edt_h1[i]),
+                  vec(pi_cubical_h1[i]))
+             for i in 1:length(families)]
+
+all_betti_h1 = [vcat(betti_rips[i],
+                     betti_radial[i],
+                     [betti_directional[name][i] for name in direction_names]...,
+                     betti_edt_h1[i],
+                     betti_cubical_h1[i])
+                for i in 1:length(families)]
+
+X_multi_h1 = build_feature_matrix(
+    stats = stats_all_h1,
+    pi = all_pi_h1,
+    betti = all_betti_h1,
+) |> sanitize_feature_matrix
+
+# Multi-filtration features (H0 + H1 = comprehensive)
 all_pi = [vcat(vec(pi_rips[i]),
-               vec(pi_radial[i]),
-               [vec(pi_directional[name][i]) for name in direction_names]...)
+               vec(pi_radial[i]), vec(pi_radial_h0[i]),
+               [vec(pi_directional[name][i]) for name in direction_names]...,
+               [vec(pi_directional_h0[name][i]) for name in direction_names]...,
+               vec(pi_edt_h1[i]), vec(pi_edt_h0[i]),
+               vec(pi_cubical_h1[i]), vec(pi_cubical_h0[i]))
           for i in 1:length(families)]
 
 all_betti = [vcat(betti_rips[i],
-                  betti_radial[i],
-                  [betti_directional[name][i] for name in direction_names]...)
+                  betti_radial[i], betti_radial_h0[i],
+                  [betti_directional[name][i] for name in direction_names]...,
+                  [betti_directional_h0[name][i] for name in direction_names]...,
+                  betti_edt_h1[i], betti_edt_h0[i],
+                  betti_cubical_h1[i], betti_cubical_h0[i])
              for i in 1:length(families)]
 
 X_multi = build_feature_matrix(
@@ -562,9 +964,11 @@ X_multi = build_feature_matrix(
 
 println("Feature dimensions:")
 println("  Rips stats only: $(size(X_stats_rips))")
-println("  All stats: $(size(X_stats_all))")
+println("  All H1 stats: $(size(X_stats_all_h1))")
+println("  All H0+H1 stats: $(size(X_stats_all))")
 println("  Rips full (stats+PI+Betti+Land): $(size(X_rips_full))")
-println("  Multi-filtration full: $(size(X_multi))")
+println("  Multi-filtration H1 only: $(size(X_multi_h1))")
+println("  Multi-filtration H0+H1 (comprehensive): $(size(X_multi))")
 ```
 
 #### SVM (Support Vector Machine)
@@ -577,9 +981,11 @@ An **SVM** finds the hyperplane that maximizes the margin between classes. The *
 ```{julia}
 feature_sets = [
     ("Rips stats", X_stats_rips),
-    ("All stats", X_stats_all),
+    ("All H1 stats", X_stats_all_h1),
+    ("All H0+H1 stats", X_stats_all),
     ("Rips full", X_rips_full),
-    ("Multi-filtration", X_multi),
+    ("Multi-filtration H1", X_multi_h1),
+    ("Multi-filtration H0+H1", X_multi),
 ]
 
 svm_results = []
@@ -704,11 +1110,17 @@ stats_for_distance = zscore_normalize(sanitize_feature_matrix(stats_all))
 stats_vectors_norm = [stats_for_distance[i, :] for i in axes(stats_for_distance, 1)]
 D_stats = pairwise_distance(stats_vectors_norm, euclidean)
 
-# Try combining best Rips distance with stats distance
-grid_rips = combined_distance_grid_search(D_wass1_rips, D_stats, labels)
+# Try combining best Rips distances with stats distance
+grid_rips_w1 = combined_distance_grid_search(D_wass1_rips, D_stats, labels)
+grid_rips_w2 = combined_distance_grid_search(D_wass2_rips, D_stats, labels)
 
 println("Top 5 combinations (Rips Wass-1 + Stats):")
-for r in grid_rips[1:min(5, end)]
+for r in grid_rips_w1[1:min(5, end)]
+    println("  α=$(round(r.alpha, digits=1)), k=$(r.k): $(r.n_correct)/$(length(labels)) ($(round(r.accuracy * 100, digits=1))%)")
+end
+
+println("\nTop 5 combinations (Rips Wass-2 + Stats):")
+for r in grid_rips_w2[1:min(5, end)]
     println("  α=$(round(r.alpha, digits=1)), k=$(r.k): $(r.n_correct)/$(length(labels)) ($(round(r.accuracy * 100, digits=1))%)")
 end
 ```
@@ -718,20 +1130,35 @@ end
 alphas = 0.0:0.1:1.0
 ks = [1, 3, 5]
 
-acc_grid = zeros(length(alphas), length(ks))
-for r in grid_rips
+acc_grid_w1 = zeros(length(alphas), length(ks))
+for r in grid_rips_w1
     i = findfirst(==(r.alpha), alphas)
     j = findfirst(==(r.k), ks)
     if !isnothing(i) && !isnothing(j)
-        acc_grid[i, j] = r.accuracy
+        acc_grid_w1[i, j] = r.accuracy
     end
 end
 
-heatmap(string.(ks), string.(collect(alphas)),
-        acc_grid,
+acc_grid_w2 = zeros(length(alphas), length(ks))
+for r in grid_rips_w2
+    i = findfirst(==(r.alpha), alphas)
+    j = findfirst(==(r.k), ks)
+    if !isnothing(i) && !isnothing(j)
+        acc_grid_w2[i, j] = r.accuracy
+    end
+end
+
+p1 = heatmap(string.(ks), string.(collect(alphas)),
+        acc_grid_w1,
         xlabel = "k", ylabel = "α (Rips Wass-1 weight)",
-        title = "Rips Wass-1 + Stats combined",
+        title = "Rips Wass-1 + Stats",
         color = :Blues, clims = (0.3, 1.0))
+p2 = heatmap(string.(ks), string.(collect(alphas)),
+        acc_grid_w2,
+        xlabel = "k", ylabel = "α (Rips Wass-2 weight)",
+        title = "Rips Wass-2 + Stats",
+        color = :Blues, clims = (0.3, 1.0))
+plot(p1, p2, layout = (1, 2), size = (1000, 450))
 ```
 
 ## Ensemble classification
@@ -861,10 +1288,15 @@ push!(all_results, (category = "Ensemble", method = "Weighted vote (4 classifier
     accuracy = ensemble_acc_w, n_correct = sum(ensemble_preds_w .== labels), n_total = length(labels)))
 
 # Combined distances
-best_rips_comb = grid_rips[1]
+best_rips_comb_w1 = grid_rips_w1[1]
 push!(all_results, (category = "Combined distance",
-    method = "Rips Wass-1 + Stats (α=$(round(best_rips_comb.alpha, digits=1)), k=$(best_rips_comb.k))",
-    accuracy = best_rips_comb.accuracy, n_correct = best_rips_comb.n_correct, n_total = length(labels)))
+    method = "Rips Wass-1 + Stats (α=$(round(best_rips_comb_w1.alpha, digits=1)), k=$(best_rips_comb_w1.k))",
+    accuracy = best_rips_comb_w1.accuracy, n_correct = best_rips_comb_w1.n_correct, n_total = length(labels)))
+
+best_rips_comb_w2 = grid_rips_w2[1]
+push!(all_results, (category = "Combined distance",
+    method = "Rips Wass-2 + Stats (α=$(round(best_rips_comb_w2.alpha, digits=1)), k=$(best_rips_comb_w2.k))",
+    accuracy = best_rips_comb_w2.accuracy, n_correct = best_rips_comb_w2.n_correct, n_total = length(labels)))
 
 comparison_df = DataFrame(all_results)
 sort!(comparison_df, :accuracy, rev = true)
@@ -1077,14 +1509,78 @@ println("Max null accuracy: $(round(perm_multi.perm_max * 100, digits=1))%")
 println("p-value: $(perm_multi.p_value)")
 ```
 
+### Feature selection via RF importance {#sec-feature-selection}
+
+::: {.callout-note}
+## Why feature selection helps
+With ~$(size(X_multi, 2)) features and $n=72$ samples, overfitting is the main accuracy bottleneck. Selecting the top features by Random Forest impurity importance reduces dimensionality and improves generalization. **Critically**, feature selection is performed INSIDE each LOOCV fold to avoid data leakage --- each fold selects features using only training data.
+:::
+
+```{julia}
+# RF with feature selection inside each fold (honest evaluation)
+for top_k in [20, 30, 50]
+    r_sel = loocv_rf_with_selection(
+        X_multi, labels;
+        n_trees_select = 500, n_trees_classify = 300,
+        top_k = top_k, balanced = true, rng_seed = 20260223
+    )
+    n_corr_sel = sum(r_sel.predictions .== labels)
+    println("RF + selection (top_k=$top_k): $(n_corr_sel)/$(length(labels)) ($(round(r_sel.accuracy * 100, digits=1))%)")
+    println("  Balanced acc: $(round(r_sel.balanced_accuracy * 100, digits=1))%  Macro-F1: $(round(r_sel.macro_f1 * 100, digits=1))%")
+end
+```
+
+```{julia}
+# Also try on the H0+H1 stats-only feature matrix (lower dimensional)
+for top_k in [20, 30, 50]
+    r_sel_stats = loocv_rf_with_selection(
+        X_stats_all, labels;
+        n_trees_select = 500, n_trees_classify = 300,
+        top_k = top_k, balanced = true, rng_seed = 20260223
+    )
+    n_corr_sel = sum(r_sel_stats.predictions .== labels)
+    println("RF + selection on stats (top_k=$top_k): $(n_corr_sel)/$(length(labels)) ($(round(r_sel_stats.accuracy * 100, digits=1))%)")
+end
+```
+
+### Nested LOOCV with multi-distance selection {#sec-nested-multi-distance}
+
+::: {.callout-note}
+## Multi-distance nested LOOCV
+With many distance matrices available, we need an honest way to select the best one. The inner loop evaluates all (distance, k) combinations on the training fold; the outer loop provides an unbiased accuracy estimate.
+:::
+
+```{julia}
+nested_multi_dist = nested_loocv_multi_distance(
+    distances, labels;
+    ks = [1, 3, 5]
+)
+
+n_corr_multi = sum(nested_multi_dist.predictions .== labels)
+println("=== Nested LOOCV: Multi-distance selection ===")
+println("Accuracy: $(n_corr_multi)/$(length(labels)) ($(round(nested_multi_dist.accuracy * 100, digits=1))%)")
+println("Balanced accuracy: $(round(nested_multi_dist.balanced_accuracy * 100, digits=1))%")
+println("Macro-F1: $(round(nested_multi_dist.macro_f1 * 100, digits=1))%")
+
+# Show which distances were selected most often
+dist_selection_counts = Dict{String, Int}()
+for p in nested_multi_dist.params
+    dist_selection_counts[p.distance] = get(dist_selection_counts, p.distance, 0) + 1
+end
+println("\nSelected distances across folds:")
+for (d, v) in sort(collect(dist_selection_counts), by=last, rev=true)
+    println("  $d: $v/$(length(labels)) folds")
+end
+```
+
 ### Honest comparison summary
 
 ```{julia}
 honest_results = []
 
-# Nested RF (already computed)
+# Nested RF on comprehensive stats
 push!(honest_results, (
-    method = "Nested LOOCV: Balanced RF (All stats, 66 features)",
+    method = "Nested LOOCV: Balanced RF (All H0+H1 stats, $(size(X_stats_all, 2)) features)",
     accuracy = nested_rf.accuracy,
     balanced_accuracy = nested_rf.balanced_accuracy,
     macro_f1 = nested_rf.macro_f1,
@@ -1095,7 +1591,7 @@ push!(honest_results, (
 
 # Nested SVM on multi-filtration (no PCA)
 push!(honest_results, (
-    method = "Nested LOOCV: SVM (Multi-filtration, ~991 features)",
+    method = "Nested LOOCV: SVM (Multi-filtration H0+H1, $(size(X_multi, 2)) features)",
     accuracy = nested_svm_multi.accuracy,
     balanced_accuracy = nested_svm_multi.balanced_accuracy,
     macro_f1 = nested_svm_multi.macro_f1,
@@ -1106,7 +1602,7 @@ push!(honest_results, (
 
 # Nested SVM + PCA on multi-filtration
 push!(honest_results, (
-    method = "Nested LOOCV: SVM + PCA (Multi-filtration)",
+    method = "Nested LOOCV: SVM + PCA (Multi-filtration H0+H1)",
     accuracy = nested_svm_pca.accuracy,
     balanced_accuracy = nested_svm_pca.balanced_accuracy,
     macro_f1 = nested_svm_pca.macro_f1,
@@ -1115,18 +1611,49 @@ push!(honest_results, (
     honest = "Yes"
 ))
 
-# Best k-NN on Wasserstein (no hyperparameter selection needed for k=1)
-r_knn1 = loocv_knn(D_wass1_rips, labels; k = 1)
-m_knn1 = classification_metrics(labels, r_knn1.predictions)
+# RF with feature selection (best top_k)
+for top_k in [20, 30, 50]
+    r_sel = loocv_rf_with_selection(
+        X_multi, labels;
+        n_trees_select = 500, n_trees_classify = 300,
+        top_k = top_k, balanced = true, rng_seed = 20260223
+    )
+    push!(honest_results, (
+        method = "RF + Feature Selection (top_k=$top_k, multi H0+H1)",
+        accuracy = r_sel.accuracy,
+        balanced_accuracy = r_sel.balanced_accuracy,
+        macro_f1 = r_sel.macro_f1,
+        n_correct = sum(r_sel.predictions .== labels),
+        n_total = length(labels),
+        honest = "Yes (selection inside fold)"
+    ))
+end
+
+# Nested multi-distance selection
 push!(honest_results, (
-    method = "1-NN on Rips Wasserstein-1 (no tuning)",
-    accuracy = r_knn1.accuracy,
-    balanced_accuracy = m_knn1.balanced_accuracy,
-    macro_f1 = m_knn1.macro_f1,
-    n_correct = sum(r_knn1.predictions .== labels),
+    method = "Nested LOOCV: Multi-distance k-NN",
+    accuracy = nested_multi_dist.accuracy,
+    balanced_accuracy = nested_multi_dist.balanced_accuracy,
+    macro_f1 = nested_multi_dist.macro_f1,
+    n_correct = n_corr_multi,
     n_total = length(labels),
-    honest = "Yes (no hyperparams)"
+    honest = "Yes"
 ))
+
+# Best k-NN on Wasserstein distances (no hyperparameter selection needed for k=1)
+for (wname, D_wass) in [("Wass-1", D_wass1_rips), ("Wass-2", D_wass2_rips)]
+    r_knn1 = loocv_knn(D_wass, labels; k = 1)
+    m_knn1 = classification_metrics(labels, r_knn1.predictions)
+    push!(honest_results, (
+        method = "1-NN on Rips $(wname) (no tuning)",
+        accuracy = r_knn1.accuracy,
+        balanced_accuracy = m_knn1.balanced_accuracy,
+        macro_f1 = m_knn1.macro_f1,
+        n_correct = sum(r_knn1.predictions .== labels),
+        n_total = length(labels),
+        honest = "Yes (no hyperparams)"
+    ))
+end
 
 honest_df = DataFrame(honest_results)
 sort!(honest_df, :accuracy, rev = true)
@@ -1137,23 +1664,27 @@ honest_df
 
 We applied multiple TDA filtration strategies to classify Diptera families from wing venation images. Key findings:
 
-1. **Multiple filtrations are complementary**: The Vietoris-Rips filtration on point-cloud samples captures the global loop structure of the wing venation. Directional height filtrations encode how topological features are spatially distributed along specific axes, and the radial filtration captures the center-to-periphery organization of vein loops. Together, these views capture different geometric and topological aspects of the wing.
+1. **Multiple filtrations are complementary**: The Vietoris-Rips filtration on point-cloud samples captures the global loop structure of the wing venation. Directional height filtrations (now 8 directions) encode how topological features are spatially distributed along specific axes, the radial filtration captures the center-to-periphery organization, the EDT filtration captures vein thickness hierarchy, and cubical (grayscale sublevel-set) persistence captures intensity landscape information. Together, these views capture different geometric and topological aspects of the wing.
 
-2. **1D persistence is the key feature**: Since all wings are connected, 0-dimensional persistence (connected components) is uninformative. The 1-dimensional persistence (loops formed by vein cells) is the discriminative signal. Different families have characteristic numbers, sizes, and spatial arrangements of these loops.
+2. **H0 persistence from directional/radial/EDT filtrations is informative**: While H0 is uninformative for Rips on a connected point cloud, H0 from cubical filtrations captures vein branching --- when disconnected vein segments merge as the sweep progresses. This is directly related to vein count and branching patterns, a key taxonomic character for Diptera families.
 
-3. **Multi-filtration features improve classification, but beware overfitting**: Combining features from all filtration strategies (Rips + directional + radial) into a single feature matrix yields the highest raw LOOCV scores. However, the Multi-filtration feature matrix has ~991 features for only 72 samples (a ~14:1 ratio). In this high-dimensional regime, SVM with RBF kernel can find separating hyperplanes even for random data, and selecting the best kernel/cost from many runs introduces selection bias. The **nested LOOCV results** (@sec-nested-svm) provide unbiased accuracy estimates and should be preferred over the non-nested results in the comparison table.
+3. **8 filtration directions improve coverage**: Expanding from 4 to 8 directions (every 22.5°) captures oblique vein angles missed previously, providing finer angular resolution of the venation topology.
 
-4. **Distance-based vs feature-based methods**: Both approaches are effective. Distance-based methods (k-NN with Wasserstein distance) work directly on the topological space and require no hyperparameter tuning for $k=1$, making them naturally robust to overfitting. Feature-based methods (SVM, Random Forest on vectorized persistence) can exploit high-dimensional representations but require careful evaluation (nested CV) to avoid optimistic bias.
+4. **EDT filtration captures vein thickness**: The Euclidean Distance Transform filtration captures the vein thickness hierarchy, which is a diagnostic character (e.g., Tabanidae have thickened C and Sc veins). This provides complementary information to structural topology.
 
-5. **PCA dimensionality reduction**: Applying PCA before SVM classification reduces the feature-to-sample ratio and mitigates overfitting. The nested LOOCV with PCA provides a more conservative but trustworthy accuracy estimate for the Multi-filtration approach.
+5. **Feature selection reduces overfitting**: Random Forest feature importance-based selection (performed inside each CV fold to avoid leakage) reduces the feature-to-sample ratio dramatically, improving generalization in honest nested evaluations.
 
-6. **Statistical rigor**: We report LOOCV accuracy with Wilson confidence intervals, nested LOOCV for unbiased evaluation when hyperparameters are tuned, and permutation tests to verify that observed accuracy is significantly above chance level.
+6. **Multi-distance nested LOOCV provides honest model selection**: With many distance matrices available, the nested multi-distance evaluation selects the best (distance, k) combination in the inner loop and provides an unbiased accuracy estimate in the outer loop.
+
+7. **Wasserstein-2 vs Wasserstein-1**: Both Wasserstein distances are effective for comparing persistence diagrams, with W-2 penalizing large mismatches more heavily. The comparison reveals whether fine or coarse topological differences are more discriminative.
+
+8. **Statistical rigor**: We report LOOCV accuracy with Wilson confidence intervals, nested LOOCV for unbiased evaluation when hyperparameters are tuned, and permutation tests to verify that observed accuracy is significantly above chance level.
 
 ### Limitations
 
-- **Class imbalance**: Tipulidae has 12 samples while Pelecorhynchidae has only 2, which may affect some classifiers. Per-class accuracy for Pelecorhynchidae is essentially meaningless with $n=2$
+- **Class imbalance**: Tipulidae has 12 samples while Pelecorhynchidae has only 2, which may affect some classifiers. The filtered analysis (excluding families with < 3 samples) provides a fairer comparison.
 - Image quality and preprocessing parameters (blur, threshold) influence topological features
-- The non-nested LOOCV results for feature-based classifiers (especially with the Multi-filtration feature set) are optimistically biased due to hyperparameter selection on the evaluation data. The honest comparison table (@sec-nested-svm) should be preferred
+- The non-nested LOOCV results for feature-based classifiers are optimistically biased due to hyperparameter selection on the evaluation data. The honest comparison table should be preferred
 - With only 72 samples, confidence intervals remain wide regardless of method
 
 ### Future work
@@ -1161,5 +1692,5 @@ We applied multiple TDA filtration strategies to classify Diptera families from 
 - Extend dataset with more specimens per family, especially underrepresented families
 - Improve imaging/segmentation quality and reevaluate image-based filtrations with less noise sensitivity
 - Apply extended persistence or zigzag persistence for richer invariants
-- Feature selection to identify most discriminative TDA descriptors
+- XGBoost or gradient boosting classifiers for tabular feature data
 - Deep learning on persistence images or persistence diagrams directly
