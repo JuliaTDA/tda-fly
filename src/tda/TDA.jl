@@ -25,9 +25,27 @@ export # Persistence computations
     # TDA statistics
     count_intervals,
     max_persistence,
+    min_persistence,
+    mean_persistence,
     total_persistence,
     median_persistence,
+    std_persistence,
     persistence_entropy,
-    pd_statistics
+    persistence_range,
+    persistence_iqr,
+    persistence_cv,
+    persistence_skewness,
+    persistence_kurtosis,
+    second_max_persistence,
+    ratio_top_to_total,
+    n_significant,
+    mean_birth,
+    mean_death,
+    std_birth,
+    std_death,
+    mean_midlife,
+    std_midlife,
+    pd_statistics,
+    pd_stat_names
 
 end

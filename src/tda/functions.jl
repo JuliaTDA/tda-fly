@@ -369,24 +369,224 @@ function std_persistence(pd)
 end
 
 """
+    min_persistence(pd)
+
+Minimum (non-zero) persistence value.
+"""
+function min_persistence(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i)) && persistence(i) > 0]
+    isempty(vals) ? 0.0 : minimum(vals)
+end
+
+"""
+    mean_persistence(pd)
+
+Mean persistence value.
+"""
+function mean_persistence(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : mean(vals)
+end
+
+"""
+    persistence_range(pd)
+
+Range of persistence values (max - min).
+"""
+function persistence_range(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : maximum(vals) - minimum(vals)
+end
+
+"""
+    persistence_iqr(pd)
+
+Interquartile range (Q75 - Q25) of persistence values.
+"""
+function persistence_iqr(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : quantile(vals, 0.75) - quantile(vals, 0.25)
+end
+
+"""
+    persistence_cv(pd)
+
+Coefficient of variation (std / mean) of persistence values.
+"""
+function persistence_cv(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) && return 0.0
+    m = mean(vals)
+    m == 0 && return 0.0
+    std(vals) / m
+end
+
+"""
+    persistence_skewness(pd)
+
+Skewness of persistence values (Fisher's definition).
+"""
+function persistence_skewness(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    length(vals) < 3 && return 0.0
+    m = mean(vals)
+    s = std(vals)
+    s == 0 && return 0.0
+    n = length(vals)
+    sum(((v - m) / s)^3 for v in vals) * n / ((n - 1) * (n - 2))
+end
+
+"""
+    persistence_kurtosis(pd)
+
+Excess kurtosis of persistence values.
+"""
+function persistence_kurtosis(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    length(vals) < 4 && return 0.0
+    m = mean(vals)
+    s = std(vals)
+    s == 0 && return 0.0
+    n = length(vals)
+    m4 = mean((v - m)^4 for v in vals)
+    m4 / s^4 - 3.0
+end
+
+"""
+    second_max_persistence(pd)
+
+Second largest persistence value.
+"""
+function second_max_persistence(pd)
+    vals = sort([persistence(i) for i in pd if isfinite(persistence(i))], rev=true)
+    length(vals) < 2 ? 0.0 : vals[2]
+end
+
+"""
+    ratio_top_to_total(pd)
+
+Ratio of max persistence to total persistence. Measures concentration.
+"""
+function ratio_top_to_total(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) && return 0.0
+    tot = sum(vals)
+    tot == 0 && return 0.0
+    maximum(vals) / tot
+end
+
+"""
+    n_significant(pd)
+
+Number of intervals with persistence > mean + std (significant features).
+"""
+function n_significant(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) && return 0.0
+    threshold = mean(vals) + std(vals)
+    Float64(count(>(threshold), vals))
+end
+
+"""
+    std_birth(pd)
+
+Standard deviation of birth times.
+"""
+function std_birth(pd)
+    vals = [birth(i) for i in pd if isfinite(persistence(i))]
+    length(vals) < 2 ? 0.0 : std(vals)
+end
+
+"""
+    std_death(pd)
+
+Standard deviation of death times.
+"""
+function std_death(pd)
+    vals = [death(i) for i in pd if isfinite(death(i))]
+    length(vals) < 2 ? 0.0 : std(vals)
+end
+
+"""
+    mean_midlife(pd)
+
+Mean midlife = mean((birth + death) / 2) across all intervals.
+"""
+function mean_midlife(pd)
+    vals = [(birth(i) + death(i)) / 2 for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : mean(vals)
+end
+
+"""
+    std_midlife(pd)
+
+Standard deviation of midlife values.
+"""
+function std_midlife(pd)
+    vals = [(birth(i) + death(i)) / 2 for i in pd if isfinite(persistence(i))]
+    length(vals) < 2 ? 0.0 : std(vals)
+end
+
+"""
     pd_statistics(pd; threshold=0.0)
 
 Extract a comprehensive feature vector from a persistence diagram.
-Returns 11 features:
-[count, max_pers, total_pers, total_pers2, q10, q25, median, q75, q90, entropy, std_pers]
+Returns 29 features covering persistence, birth/death, and shape statistics.
 """
 function pd_statistics(pd; threshold=0.0)
     [
-        Float64(count_intervals(pd; threshold=threshold)),
-        max_persistence(pd),
-        total_persistence(pd; p=1),
-        total_persistence(pd; p=2),
-        quantile_persistence(pd, 0.10),
-        quantile_persistence(pd, 0.25),
-        median_persistence(pd),
-        quantile_persistence(pd, 0.75),
-        quantile_persistence(pd, 0.90),
-        persistence_entropy(pd),
-        std_persistence(pd)
+        # Count and basic persistence
+        Float64(count_intervals(pd; threshold=threshold)),   # 1
+        max_persistence(pd),                                  # 2
+        min_persistence(pd),                                  # 3
+        mean_persistence(pd),                                 # 4
+        median_persistence(pd),                               # 5
+        std_persistence(pd),                                  # 6
+        # Totals
+        total_persistence(pd; p=1),                           # 7
+        total_persistence(pd; p=2),                           # 8
+        # Quantiles
+        quantile_persistence(pd, 0.05),                       # 9
+        quantile_persistence(pd, 0.10),                       # 10
+        quantile_persistence(pd, 0.25),                       # 11
+        quantile_persistence(pd, 0.75),                       # 12
+        quantile_persistence(pd, 0.90),                       # 13
+        quantile_persistence(pd, 0.95),                       # 14
+        # Shape and spread
+        persistence_range(pd),                                # 15
+        persistence_iqr(pd),                                  # 16
+        persistence_cv(pd),                                   # 17
+        persistence_skewness(pd),                             # 18
+        persistence_kurtosis(pd),                             # 19
+        # Entropy and concentration
+        persistence_entropy(pd),                              # 20
+        second_max_persistence(pd),                           # 21
+        ratio_top_to_total(pd),                               # 22
+        n_significant(pd),                                    # 23
+        # Birth/death statistics
+        mean_birth(pd),                                       # 24
+        mean_death(pd),                                       # 25
+        std_birth(pd),                                        # 26
+        std_death(pd),                                        # 27
+        # Midlife statistics
+        mean_midlife(pd),                                     # 28
+        std_midlife(pd),                                      # 29
+    ]
+end
+
+"""
+    pd_stat_names()
+
+Return the names of the statistics computed by `pd_statistics`.
+"""
+function pd_stat_names()
+    [
+        "count", "max_pers", "min_pers", "mean_pers", "median_pers", "std_pers",
+        "total_pers", "total_pers2",
+        "q05", "q10", "q25", "q75", "q90", "q95",
+        "range", "iqr", "cv", "skewness", "kurtosis",
+        "entropy", "second_max", "ratio_top", "n_significant",
+        "mean_birth", "mean_death", "std_birth", "std_death",
+        "mean_midlife", "std_midlife",
     ]
 end
