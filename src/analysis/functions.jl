@@ -1143,3 +1143,172 @@ function classification_report(D::Matrix, y::Vector; k=1, n_permutations=10000)
      balanced_accuracy=metrics.balanced_accuracy, macro_f1=metrics.macro_f1,
      p_value=perm.p_value, chance_level=perm.perm_mean)
 end
+
+# =============================================================================
+# Feature Selection via Random Forest Importance
+# =============================================================================
+
+"""
+    select_features_rf(X::Matrix, labels::Vector{String}; n_trees=500, top_k=30, rng_seed=42)
+
+Select the top-k most important features using Random Forest impurity importance.
+Returns (selected_indices, importances) where `selected_indices` are column indices
+into the original matrix sorted by decreasing importance.
+
+IMPORTANT: This must be called INSIDE each CV fold to avoid data leakage.
+"""
+function select_features_rf(X::Matrix, labels::Vector{String};
+                             n_trees=500, top_k=30, rng_seed=42)
+    Xclean = sanitize_feature_matrix(X)
+    n_features = max(1, round(Int, sqrt(size(Xclean, 2))))
+
+    rng = MersenneTwister(rng_seed)
+    model = build_forest(labels, Xclean, n_features, n_trees, 0.7, -1, 1; rng=rng)
+
+    importances = try
+        DecisionTree.impurity_importance(model; normalize=true)
+    catch
+        # Fallback: all features equally important
+        ones(size(Xclean, 2)) ./ size(Xclean, 2)
+    end
+
+    # Handle NaN/Inf in importances
+    importances[.!isfinite.(importances)] .= 0.0
+
+    k = min(top_k, length(importances))
+    sorted_idx = sortperm(importances, rev=true)
+    selected = sorted_idx[1:k]
+
+    (indices=selected, importances=importances[selected],
+     all_importances=importances)
+end
+
+"""
+    loocv_rf_with_selection(X, labels; n_trees=500, top_k=30, ...)
+
+LOOCV with Random Forest where feature selection is performed INSIDE each fold
+to avoid data leakage. This gives an honest estimate of accuracy with feature selection.
+"""
+function loocv_rf_with_selection(X::Matrix, labels::Vector{String};
+                                 n_trees_select=500, n_trees_classify=300,
+                                 top_k=30, balanced=true, rng_seed=42)
+    Xclean = sanitize_feature_matrix(X)
+    n = size(Xclean, 1)
+    predictions = Vector{String}(undef, n)
+    selected_features = Vector{Vector{Int}}(undef, n)
+
+    for i in 1:n
+        train_idx = setdiff(1:n, i)
+        X_train = Xclean[train_idx, :]
+        y_train = labels[train_idx]
+
+        # Feature selection on training data only
+        sel = select_features_rf(X_train, y_train;
+                                  n_trees=n_trees_select, top_k=top_k,
+                                  rng_seed=rng_seed + i)
+        feat_idx = sel.indices
+        selected_features[i] = feat_idx
+
+        X_train_sel = X_train[:, feat_idx]
+        X_test_sel = Xclean[i:i, feat_idx]
+
+        rng_outer = MersenneTwister(rng_seed + 10_000 + i)
+        if balanced
+            bal_idx = _balanced_bootstrap_indices(y_train; rng=rng_outer, target_balance=:max)
+            X_fit = X_train_sel[bal_idx, :]
+            y_fit = y_train[bal_idx]
+        else
+            X_fit = X_train_sel
+            y_fit = y_train
+        end
+
+        n_features = max(1, round(Int, sqrt(size(X_fit, 2))))
+        model = build_forest(y_fit, X_fit, n_features, n_trees_classify, 0.7, -1, 1; rng=rng_outer)
+        predictions[i] = apply_forest(model, vec(X_test_sel))
+    end
+
+    metrics = classification_metrics(labels, predictions)
+    (
+        accuracy=metrics.accuracy,
+        balanced_accuracy=metrics.balanced_accuracy,
+        macro_f1=metrics.macro_f1,
+        predictions=predictions,
+        selected_features=selected_features
+    )
+end
+
+# =============================================================================
+# Nested LOOCV for Multiple Distance Matrices
+# =============================================================================
+
+"""
+    nested_loocv_multi_distance(distances_dict, labels; ks=[1, 3, 5])
+
+Nested leave-one-out cross-validation that selects the best distance matrix
+and k value in the inner loop. The outer loop provides unbiased accuracy.
+
+`distances_dict` is a Dict{String, Matrix} of named distance matrices.
+Inner loop: for each held-out sample, evaluates all (distance, k) combinations
+on the remaining samples via inner LOOCV, picks the best, and predicts the held-out sample.
+"""
+function nested_loocv_multi_distance(distances_dict::Dict{String, <:AbstractMatrix},
+                                      labels::Vector;
+                                      ks=[1, 3, 5])
+    n = length(labels)
+    dist_names = collect(keys(distances_dict))
+
+    # Normalize all distance matrices once
+    normalized = Dict(name => normalize_by_max(D) for (name, D) in distances_dict)
+
+    predictions = Vector{eltype(labels)}(undef, n)
+    selected_params = Vector{NamedTuple}(undef, n)
+
+    for i in 1:n
+        inner_idx = setdiff(1:n, i)
+        y_inner = labels[inner_idx]
+
+        best_acc = -1.0
+        best_dist_name = dist_names[1]
+        best_k = ks[1]
+
+        for (name, Dn) in normalized
+            D_inner = Dn[inner_idx, inner_idx]
+            for k in ks
+                inner_result = loocv_knn(D_inner, y_inner; k=k)
+                if inner_result.accuracy > best_acc
+                    best_acc = inner_result.accuracy
+                    best_dist_name = name
+                    best_k = k
+                end
+            end
+        end
+
+        D_best = normalized[best_dist_name]
+        predictions[i] = knn_predict(D_best, labels, i; k=best_k)
+        selected_params[i] = (distance=best_dist_name, k=best_k, inner_acc=best_acc)
+    end
+
+    accuracy = mean(predictions .== labels)
+    metrics = classification_metrics(labels, predictions)
+    (
+        accuracy=accuracy,
+        balanced_accuracy=metrics.balanced_accuracy,
+        macro_f1=metrics.macro_f1,
+        predictions=predictions,
+        params=selected_params
+    )
+end
+
+# =============================================================================
+# XGBoost Classifier (Optional — requires XGBoost.jl)
+# =============================================================================
+
+"""
+    loocv_xgboost(X, labels; n_rounds=100, max_depth=6, eta=0.3, rng_seed=42)
+
+Leave-one-out cross-validation with XGBoost.
+Requires XGBoost.jl to be installed. Returns error if not available.
+
+To use: add XGBoost.jl to your project with `] add XGBoost`.
+"""
+function loocv_xgboost end  # Forward declaration; implementation requires XGBoost.jl

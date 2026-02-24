@@ -6,9 +6,15 @@ export # Persistence computations
     cubical_pd,
     cubical_pd_1d,
     directional_pd_1d,
+    directional_pd_0d,
     radial_pd_1d,
+    radial_pd_0d,
     height_filtration,
     radial_filtration,
+    # EDT filtration
+    edt_filtration,
+    edt_pd_1d,
+    edt_pd_0d,
     # Plotting
     plot_barcode,
     plot_pd,

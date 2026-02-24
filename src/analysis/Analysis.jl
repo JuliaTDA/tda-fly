@@ -35,18 +35,24 @@ export pairwise_distance,
     ensemble_vote,
     # Feature engineering
     build_feature_matrix,
+    # Feature selection
+    select_features_rf,
+    loocv_rf_with_selection,
     # PCA + SVM
     loocv_svm_pca,
     # Nested LOOCV
     nested_loocv,
     nested_loocv_random_forest,
     nested_loocv_svm,
+    nested_loocv_multi_distance,
     # Statistical validation
     wilson_ci,
     confusion_matrix,
     permutation_test,
     permutation_test_svm,
     classification_metrics,
-    classification_report
+    classification_report,
+    # XGBoost (optional)
+    loocv_xgboost
 
 end

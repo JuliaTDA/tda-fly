@@ -6,6 +6,7 @@ using MetricSpaces
 using PersistenceDiagrams
 using StatsBase: mean, median, std, quantile
 using LinearAlgebra: norm
+using Images: feature_transform, distance_transform
 
 @reexport using MetricSpaces: random_sample
 
@@ -98,6 +99,19 @@ function directional_pd_1d(A::AbstractMatrix, direction::Vector{<:Real})
 end
 
 """
+    directional_pd_0d(img_array, direction)
+
+Compute 0-dimensional persistence via a directional (height) filtration.
+Captures when disconnected vein segments merge as the sweep progresses ---
+directly related to vein count and branching patterns.
+"""
+function directional_pd_0d(A::AbstractMatrix, direction::Vector{<:Real})
+    F = height_filtration(A, direction)
+    result = ripserer(Cubical(F); dim_max=1)
+    result[1]
+end
+
+"""
     radial_filtration(A; threshold=0.5)
 
 Build a filtration where each foreground pixel is assigned its distance to the
@@ -145,6 +159,83 @@ function radial_pd_1d(A::AbstractMatrix)
     F = radial_filtration(A)
     result = ripserer(Cubical(F); dim_max=1)
     result[2]
+end
+
+"""
+    radial_pd_0d(img_array)
+
+Compute 0-dimensional persistence via a radial (distance-from-centroid) filtration.
+Captures how disconnected vein segments merge as the radial sweep grows outward.
+"""
+function radial_pd_0d(A::AbstractMatrix)
+    F = radial_filtration(A)
+    result = ripserer(Cubical(F); dim_max=1)
+    result[1]
+end
+
+# =============================================================================
+# Euclidean Distance Transform (EDT) Filtration
+# =============================================================================
+
+"""
+    edt_filtration(A::AbstractMatrix; threshold=0.5)
+
+Build a filtration from the Euclidean Distance Transform (EDT).
+Each foreground pixel is assigned its distance to the nearest background pixel.
+Thick veins (C, R, M) get high values. Negating the EDT and using sublevel-set
+persistence captures the vein thickness hierarchy.
+
+Returns a matrix suitable for `Cubical()`.
+"""
+function edt_filtration(A::AbstractMatrix; threshold=0.5)
+    # Binary mask: foreground = true (dark pixels = veins)
+    binary = (1.0 .- Float64.(A)) .> threshold
+    rows, cols = size(A)
+
+    if !any(binary) || all(binary)
+        return fill(2.0, rows, cols)
+    end
+
+    # Compute EDT using Images.jl
+    ft = feature_transform(binary)
+    edt_vals = distance_transform(ft)
+
+    # Negate so thick veins (high EDT) appear first (low filtration value)
+    # Background gets high filtration value
+    F = fill(2.0, rows, cols)
+    max_edt = maximum(edt_vals[binary])
+    if max_edt > 0
+        for i in 1:rows, j in 1:cols
+            if binary[i, j]
+                F[i, j] = 1.0 - edt_vals[i, j] / max_edt  # Normalize to [0, 1]
+            end
+        end
+    end
+    F
+end
+
+"""
+    edt_pd_1d(img_array)
+
+Compute 1-dimensional persistence from EDT filtration.
+Captures loops formed by thick vein structures.
+"""
+function edt_pd_1d(A::AbstractMatrix)
+    F = edt_filtration(A)
+    result = ripserer(Cubical(F); dim_max=1)
+    result[2]
+end
+
+"""
+    edt_pd_0d(img_array)
+
+Compute 0-dimensional persistence from EDT filtration.
+Captures how vein thickness components merge.
+"""
+function edt_pd_0d(A::AbstractMatrix)
+    F = edt_filtration(A)
+    result = ripserer(Cubical(F); dim_max=1)
+    result[1]
 end
 
 # =============================================================================

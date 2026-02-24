@@ -5,7 +5,6 @@ authors = ["vituri <vituri.vituri@gmail.com>"]
 
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Chain = "8be319e6-bccf-4806-a6f7-6fae938471bc"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DecisionTree = "7806a523-6efd-50cb-b5f6-3fa6f1930dbb"
@@ -15,6 +14,8 @@ ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 ImageTransformations = "02fcd773-0e25-5acc-982a-7f6622650795"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MCPRepl = "b62cb57a-788d-40b5-9d64-84a1dfc37ce3"
 MetricSpaces = "737298cd-3e4b-40c4-a4ce-863151543a8d"
 MultivariateStats = "6f286f6a-111f-5878-ab1e-185364afe411"
 PersistenceDiagrams = "90b4794c-894b-4756-a0f8-5efeb5ddf7ae"
