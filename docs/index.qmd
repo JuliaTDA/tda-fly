@@ -20,12 +20,12 @@ keywords:
   - Diptera classification
   - Wing venation
 abstract: |
-  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. Using two complementary filtration strategies --- Vietoris-Rips on point clouds and radial filtrations on wing images --- we extract both H0 and H1 topological features via extended summary statistics and compare classifiers via leave-one-out cross-validation. We focus on interpretable models (LDA, Decision Trees) to identify explainable topological criteria that distinguish families.
+  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. Using three complementary filtration strategies --- Vietoris-Rips on point clouds, radial filtrations, and directional (height) filtrations on wing images --- we extract H0 and H1 topological features via extended summary statistics and compare classifiers via leave-one-out cross-validation. We focus on interpretable models (LDA, Decision Trees) to identify explainable topological criteria that distinguish families.
 plain-language-summary: |
-  We use mathematical tools that detect "shapes" in data --- specifically loops and connected components in fly wing vein networks --- to automatically classify different families of flies (Diptera). By looking at wing images through two topological lenses (Rips filtration on point clouds and radial filtration from the wing center), we extract interpretable numerical features and build explainable classifiers.
+  We use mathematical tools that detect "shapes" in data --- specifically loops and connected components in fly wing vein networks --- to automatically classify different families of flies (Diptera). By looking at wing images through three topological lenses (Rips filtration on point clouds, radial filtration from the wing center, and directional sweeps), we extract interpretable numerical features and build explainable classifiers.
 key-points:
-  - Two TDA filtration strategies (Rips and radial) capture complementary geometric and topological information from wing venation.
-  - 1-dimensional persistent homology (loops) is the most discriminative topological feature for wing classification.
+  - Three TDA filtration strategies (Rips, radial, and directional) capture complementary geometric and topological information from wing venation.
+  - Directional H0 persistence captures vein count and branching patterns across four sweep directions.
   - Simple summary statistics from persistence diagrams suffice for accurate, explainable classification.
 date: last-modified
 bibliography: references.bib
@@ -38,7 +38,7 @@ jupyter: julia-1.12.4-project-1.12
 ```{julia}
 using TDAfly, TDAfly.Preprocessing, TDAfly.TDA, TDAfly.Analysis
 using Images: mosaicview, Gray
-using Plots: plot, display, heatmap, scatter, bar
+using Plots: plot, display, heatmap, scatter, bar, bar!, default
 using StatsPlots: boxplot
 using PersistenceDiagrams
 using PersistenceDiagrams: BettiCurve, Landscape, PersistenceImage
@@ -46,6 +46,14 @@ using DataFrames
 using Distances: euclidean
 using LIBSVM
 using StatsBase: mean
+
+# Use raster plots for notebook frontends that may mis-render large SVG outputs.
+default(fmt = :png, dpi = 180)
+```
+
+```{julia}
+#| include: false
+1
 ```
 
 ## Introduction
@@ -257,7 +265,7 @@ demo_connectivity_df
 
 ## Topological feature extraction
 
-We compute persistent homology using two filtration strategies. For the Vietoris-Rips filtration on connected point clouds, H0 is uninformative (single infinite bar), so we use only H1. For the radial filtration (computed via sublevel-set persistence on the pixel grid), **H0 is highly informative** --- it captures when disconnected vein segments merge as the filtration parameter grows, directly encoding vein count and branching patterns. We therefore compute both H0 and H1 for the radial filtration.
+We compute persistent homology using three filtration strategies. For the Vietoris-Rips filtration on connected point clouds, H0 is uninformative (single infinite bar), so we use only H1. For the radial filtration (computed via sublevel-set persistence on the pixel grid), we use only **H0**, which captures when disconnected vein segments merge as the radial sweep grows outward --- directly encoding vein count and branching patterns. Radial H1 is omitted because pixelated binary images produce very few clean loops under this filtration. We also compute **directional (height) H0 persistence** in four sweep directions, capturing how vein connectivity changes along different axes.
 
 ::: {.callout-note}
 ## What is persistent homology?
@@ -287,23 +295,33 @@ end;
 ```
 
 ```{julia}
-wing_arrays = [convert(Array{Float64}, w) for w in wings]
+# Build connected binary arrays: same size as the loaded wing image,
+# foreground pixels connected via Minimum Spanning Tree bridges.
+# Values: 0.0 = foreground (dark veins), 1.0 = background — matching the
+# format expected by height_filtration / radial_filtration (which check
+# 1.0 - A[i,j] > threshold internally).
+function make_connected_array(w; threshold = 0.08, connectivity = 8)
+    rows, cols = size(w)
+    ids = findall_ids(>(threshold), image_to_array(w))
+    ids_conn = connect_pixel_components(ids; connectivity = connectivity)
+    A = ones(Float64, rows, cols)
+    for p in ids_conn
+        A[p[1], p[2]] = 0.0
+    end
+    A
+end
+
+wing_arrays = [make_connected_array(w) for w in wings]
 ```
 
 ### Strategy 2: Radial filtration {#sec-radial}
 
 ::: {.callout-note}
 ## Radial filtration
-The **radial filtration** assigns each foreground pixel a value equal to its distance from the centroid of the wing. Sublevel-set persistence on this function captures how topological features (loops in the venation) are distributed from the center of the wing outward. This is complementary to the Rips filtration, which captures global loop structure without spatial information.
+The **radial filtration** assigns each foreground pixel a value equal to its distance from the centroid of the wing. Sublevel-set persistence on this function captures how topological features are distributed from the center of the wing outward. This is complementary to the Rips filtration, which captures global loop structure without spatial information.
 :::
 
-```{julia}
-pds_radial = @showprogress "radial_pd_1d" map(wing_arrays) do A
-    radial_pd_1d(A)
-end;
-```
-
-We also compute H0 persistence for the radial filtration, capturing how disconnected vein segments merge as the radial sweep grows outward:
+We compute H0 persistence for the radial filtration, capturing how disconnected vein segments merge as the radial sweep grows outward:
 
 ```{julia}
 pds_radial_h0 = @showprogress "radial_pd_0d" map(wing_arrays) do A
@@ -311,9 +329,28 @@ pds_radial_h0 = @showprogress "radial_pd_0d" map(wing_arrays) do A
 end;
 ```
 
+### Strategy 3: Directional (height) filtration {#sec-directional}
+
+::: {.callout-note}
+## Directional filtration
+The **directional (height) filtration** sweeps a hyperplane across the wing along a given direction. Each foreground pixel is assigned a value equal to its projection onto the sweep direction. As the sweep progresses, disconnected vein segments merge --- captured by H0 persistence. We use four directions: horizontal `[1,0]`, vertical `[0,1]`, and both diagonals `[1,1]` and `[1,-1]`.
+:::
+
+```{julia}
+directions = [[1, 0], [0, 1], [1, 1], [1, -1]]
+direction_names = ["horiz", "vert", "diag1", "diag2"]
+
+pds_dir_h0 = Dict{String, Vector}()
+for (dir, name) in zip(directions, direction_names)
+    pds_dir_h0[name] = @showprogress "dir_h0_$name" map(wing_arrays) do A
+        directional_pd_0d(A, dir)
+    end
+end;
+```
+
 ### Visualizing the radial filtration {#sec-radial-examples}
 
-The radial filtration assigns each foreground pixel a value proportional to its distance from the wing centroid. Below we visualize the radial filtration arrays and the resulting persistence diagrams for one wing per family:
+The radial filtration assigns each foreground pixel a value proportional to its distance from the wing centroid. Below we visualize the radial filtration arrays and the resulting H0 persistence diagrams for one wing per family:
 
 ```{julia}
 example_indices = [findfirst(==(f), families) for f in sort(unique(families))]
@@ -335,42 +372,83 @@ for i in example_indices[1:min(5, length(example_indices))]
                  title = "Wing image",
                  aspect_ratio = :equal, xticks = false, yticks = false)
 
-    pers_rad_h1 = persistence.(pds_radial[i])
-    p3 = isempty(pers_rad_h1) ? plot(title = "Radial H₁ (empty)") :
-         bar(sort(pers_rad_h1, rev = true), title = "Radial H₁ (loops)",
-             legend = false, ylabel = "persistence")
-
     pers_rad_h0 = [persistence(x) for x in pds_radial_h0[i] if isfinite(persistence(x))]
-    p4 = isempty(pers_rad_h0) ? plot(title = "Radial H₀ (empty)") :
+    p3 = isempty(pers_rad_h0) ? plot(title = "Radial H₀ (empty)") :
          bar(sort(pers_rad_h0, rev = true), title = "Radial H₀ (components)",
              legend = false, ylabel = "persistence")
 
-    p = plot(p1, p2, p3, p4, layout = (2, 2), size = (900, 700),
+    p = plot(p1, p2, p3, layout = (1, 3), size = (1200, 400),
              plot_title = "$(families[i]) — $(individuals[i])")
     display(p)
 end;
 ```
 
+### Radial filtration gallery: all families {#sec-radial-gallery}
+
+Below we show all specimens organised by family. The top row shows the wing image (greyscale) and the bottom row shows the radial filtration (viridis colour scale, brighter = farther from centroid). Background pixels are masked.
+
+```{julia}
+# ── Helpers used throughout the rest of the document ───────────────────────
+# wing_panel / radial_panel are reused in "Misclassified wings" below.
+
+function wing_panel(idx; title_str = "")
+    heatmap(
+        wing_arrays[idx][end:-1:1, :],
+        color = :grays, colorbar = false,
+        aspect_ratio = :equal, xticks = false, yticks = false,
+        title = title_str, titlefontsize = 7,
+    )
+end
+
+function radial_panel(idx; title_str = "")
+    F = radial_filtration(wing_arrays[idx])
+    F_display = copy(F)
+    F_display[F_display .> 1.5] .= NaN
+    heatmap(
+        F_display[end:-1:1, :],
+        color = :viridis, colorbar = false,
+        aspect_ratio = :equal, xticks = false, yticks = false,
+        title = title_str, titlefontsize = 7,
+    )
+end
+
+# One block per family: top row = wings, bottom row = radial filtrations
+for f in sort(unique(families))
+    fidx = findall(==(f), families)
+    n_f  = length(fidx)
+    wing_ps   = [wing_panel(i;   title_str = individuals[i]) for i in fidx]
+    radial_ps = [radial_panel(i; title_str = (i == fidx[1] ? "radial" : "")) for i in fidx]
+    p = plot([wing_ps; radial_ps]...,
+             layout = (2, n_f),
+             size   = (220 * n_f, 440),
+             plot_title = f)
+    display(p)
+end
+```
+
 ### Examples: persistence diagrams from each strategy
 
-Below we show persistence diagrams from both Rips and radial filtrations for one specimen per family:
+Below we show persistence diagrams from the Rips, radial, and directional filtrations for one specimen per family:
 
 ```{julia}
 for i in example_indices
     pers_rips = persistence.(pds_rips[i])
-    pers_rad = persistence.(pds_radial[i])
     pers_rad_h0 = [persistence(x) for x in pds_radial_h0[i] if isfinite(persistence(x))]
 
     p1 = isempty(pers_rips) ? plot(title = "Rips H₁ (empty)") :
          bar(sort(pers_rips, rev = true), title = "Rips H₁", legend = false, ylabel = "persistence")
-    p2 = isempty(pers_rad) ? plot(title = "Radial H₁ (empty)") :
-         bar(sort(pers_rad, rev = true), title = "Radial H₁", legend = false, ylabel = "persistence")
-    p3 = isempty(pers_rad_h0) ? plot(title = "Radial H₀ (empty)") :
+    p2 = isempty(pers_rad_h0) ? plot(title = "Radial H₀ (empty)") :
          bar(sort(pers_rad_h0, rev = true), title = "Radial H₀", legend = false, ylabel = "persistence")
-    p4 = scatter(last.(samples[i]), first.(samples[i]),
-                 aspect_ratio = :equal, markersize = 1, legend = false, title = "Point cloud")
 
-    p = plot(p1, p2, p3, p4, layout = (2, 2), size = (900, 650),
+    dir_plots = []
+    for (dir, name) in zip(directions, direction_names)
+        pers_dir = [persistence(x) for x in pds_dir_h0[name][i] if isfinite(persistence(x))]
+        p_dir = isempty(pers_dir) ? plot(title = "Dir H₀ $name (empty)") :
+             bar(sort(pers_dir, rev = true), title = "Dir H₀ ($name)", legend = false, ylabel = "persistence")
+        push!(dir_plots, p_dir)
+    end
+
+    p = plot(p1, p2, dir_plots..., layout = (2, 3), size = (1200, 650),
              plot_title = "$(families[i]) ($(individuals[i]))")
     display(p)
 end;
@@ -402,13 +480,19 @@ stat_names_ext = [
 ]
 
 stats_rips = collect(hcat([pd_statistics_extended(pd) for pd in pds_rips]...)')
-stats_radial = collect(hcat([pd_statistics_extended(pd) for pd in pds_radial]...)')
 stats_radial_h0 = collect(hcat([pd_statistics_extended(pd) for pd in pds_radial_h0]...)')
+
+stats_dir_h0 = Dict{String, Matrix}()
+for name in direction_names
+    stats_dir_h0[name] = collect(hcat([pd_statistics_extended(pd) for pd in pds_dir_h0[name]]...)')
+end
 
 println("Statistics per diagram: $(length(stat_names_ext)) features")
 println("  Rips H1: $(size(stats_rips))")
-println("  Radial H1: $(size(stats_radial))")
 println("  Radial H0: $(size(stats_radial_h0))")
+for name in direction_names
+    println("  Dir H0 ($name): $(size(stats_dir_h0[name]))")
+end
 ```
 
 #### Statistics comparison by family
@@ -420,38 +504,40 @@ stats_df = DataFrame(
     n_intervals_rips = stats_rips[:, 1],
     max_pers_rips = stats_rips[:, 2],
     entropy_rips = stats_rips[:, 10],
-    n_intervals_rad = stats_radial[:, 1],
-    max_pers_rad = stats_radial[:, 2],
-    entropy_rad = stats_radial[:, 10],
-    skewness_rips = stats_rips[:, 12],
-    median_death_rips = stats_rips[:, 15],
+    n_intervals_rad_h0 = stats_radial_h0[:, 1],
+    max_pers_rad_h0 = stats_radial_h0[:, 2],
+    n_intervals_dir_horiz = stats_dir_h0["horiz"][:, 1],
+    n_intervals_dir_vert = stats_dir_h0["vert"][:, 1],
 )
 
 p1 = boxplot(stats_df.family, stats_df.n_intervals_rips,
              title = "Rips: # H₁ intervals", legend = false, ylabel = "count", xrotation = 45)
 p2 = boxplot(stats_df.family, stats_df.max_pers_rips,
              title = "Rips: max persistence", legend = false, ylabel = "persistence", xrotation = 45)
-p3 = boxplot(stats_df.family, stats_df.n_intervals_rad,
-             title = "Radial: # H₁ intervals", legend = false, ylabel = "count", xrotation = 45)
-p4 = boxplot(stats_df.family, stats_df.max_pers_rad,
-             title = "Radial: max persistence", legend = false, ylabel = "persistence", xrotation = 45)
+p3 = boxplot(stats_df.family, stats_df.n_intervals_rad_h0,
+             title = "Radial: # H₀ intervals", legend = false, ylabel = "count", xrotation = 45)
+p4 = boxplot(stats_df.family, stats_df.n_intervals_dir_horiz,
+             title = "Dir horiz: # H₀ intervals", legend = false, ylabel = "count", xrotation = 45)
 plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 700))
 ```
 
 ## Classification {#sec-classification}
 
-We build the feature matrix from the extended summary statistics of both filtrations:
+We build the feature matrix from the extended summary statistics of all filtrations:
 
 ```{julia}
 labels = families
 
 X_features = hcat(
-    stats_rips,        # 19 features: Rips H1
-    stats_radial,      # 19 features: Radial H1
-    stats_radial_h0,   # 19 features: Radial H0
+    stats_rips,                 # 19 features: Rips H1
+    stats_radial_h0,            # 19 features: Radial H0
+    stats_dir_h0["horiz"],      # 19 features: Dir H0 horizontal
+    stats_dir_h0["vert"],       # 19 features: Dir H0 vertical
+    stats_dir_h0["diag1"],      # 19 features: Dir H0 diagonal 1
+    stats_dir_h0["diag2"],      # 19 features: Dir H0 diagonal 2
 ) |> sanitize_feature_matrix
 
-feature_blocks = ["Rips_H1", "Radial_H1", "Radial_H0"]
+feature_blocks = ["Rips_H1", "Radial_H0", "Dir_H0_horiz", "Dir_H0_vert", "Dir_H0_diag1", "Dir_H0_diag2"]
 feature_names = ["$(block)__$(stat)" for block in feature_blocks for stat in stat_names_ext]
 
 println("Feature matrix: $(size(X_features))")
@@ -531,6 +617,8 @@ first(tree_results, 10)
 ```{julia}
 best_tree = tree_results[1, :]
 
+# Build on full data with the best hyperparameters.
+# n_subfeatures = size(X_features, 2) means ALL 114 features are candidates at every split.
 tree_model = DecisionTree.build_tree(
     labels, X_features, size(X_features, 2),
     best_tree.max_depth, best_tree.min_samples_leaf, 2, 0.0;
@@ -547,31 +635,64 @@ tree_importance_df = DataFrame(
 )
 sort!(tree_importance_df, :importance, rev = true)
 
+n_nonzero = count(>(0.0), tree_importance)
 println("Best Decision Tree LOOCV: $(best_tree.n_correct)/$(length(labels)) ($(round(best_tree.accuracy * 100, digits = 1))%)")
+println("  max_depth=$(best_tree.max_depth), min_samples_leaf=$(best_tree.min_samples_leaf)")
+println("  Features considered at each split: $(size(X_features, 2)) (all)")
+println("  Features with nonzero importance: $(n_nonzero) / $(size(X_features, 2))")
 println("Balanced accuracy: $(round(best_tree.balanced_accuracy * 100, digits = 1))%")
 
 first(filter(:importance => >(0.0), tree_importance_df), 15)
 ```
 
 ```{julia}
-topk = min(12, nrow(filter(:importance => >(0.0), tree_importance_df)))
-top_tree_imp = first(filter(:importance => >(0.0), tree_importance_df), topk)
+tree_nonzero = filter(:importance => >(0.0), tree_importance_df)
+topk = min(12, nrow(tree_nonzero))
+top_tree_imp = first(tree_nonzero, topk)
 
-bar(
-    top_tree_imp.feature,
-    top_tree_imp.importance,
-    xlabel = "Feature",
-    ylabel = "Normalized impurity importance",
-    title = "Decision tree feature importance (top $(topk))",
-    legend = false,
-    xrotation = 45,
-    size = (1100, 550),
-)
+if topk == 0
+    println("No nonzero decision-tree importances to plot.")
+    p_tree_imp = plot(title = "Decision tree feature importance (no nonzero features)", legend = false)
+else
+    ord = sortperm(top_tree_imp.importance)
+    feat_plot = top_tree_imp.feature[ord]
+    imp_plot = top_tree_imp.importance[ord]
+    xmax = 1.1 * max(1e-6, maximum(imp_plot))
+
+    p_tree_imp = bar(
+        1:topk,
+        imp_plot,
+        orientation = :horizontal,
+        yticks = (1:topk, feat_plot),
+        xlabel = "Normalized impurity importance",
+        ylabel = "Feature",
+        title = "Decision tree feature importance (top $(topk))",
+        legend = false,
+        fillcolor = :steelblue,
+        linecolor = :black,
+        linewidth = 0.5,
+        xlims = (0.0, xmax),
+        size = (1200, 650),
+    )
+end
+
+display(p_tree_imp)
+p_tree_imp
 ```
 
 ```{julia}
-# Print the tree structure for interpretability
-println("Decision tree structure:")
+# Also build a deeper display tree (max_depth=10) on the full data so the full structure is visible.
+# The LOOCV used best_tree.max_depth; here we go deeper to see which features actually get used.
+display_tree = DecisionTree.build_tree(
+    labels, X_features, size(X_features, 2),
+    10, 1, 2, 0.0;
+    loss = DecisionTree.util.gini,
+    rng = MersenneTwister(20260223),
+    impurity_importance = true
+)
+display_imp = DecisionTree.impurity_importance(display_tree; normalize = true)
+println("Deep display tree (max_depth=10): features with nonzero importance = $(count(>(0.0), display_imp)) / $(length(display_imp))")
+println("\nDecision tree structure (LOOCV best, max_depth=$(best_tree.max_depth)):")
 print_tree(tree_model, feature_names = feature_names)
 ```
 
@@ -603,7 +724,8 @@ for n_trees in [100, 200, 500, 1000]
     for max_depth in [-1, 8, 12]
         for min_leaf in [1, 2]
             r = loocv_random_forest_balanced(X_features, labels;
-                    n_trees = n_trees, rng_seed = 20260223)
+                    n_trees = n_trees, max_depth = max_depth,
+                    min_samples_leaf = min_leaf, rng_seed = 20260223)
             m = classification_metrics(labels, r.predictions)
             push!(rf_grid, (
                 n_trees = n_trees, max_depth = max_depth, min_leaf = min_leaf,
@@ -624,10 +746,12 @@ first(rf_grid_df, 8)
 ```{julia}
 best_rf_row = rf_grid_df[1, :]
 r_rf = loocv_random_forest_balanced(X_features, labels;
-            n_trees = best_rf_row.n_trees, rng_seed = 20260223)
+            n_trees = best_rf_row.n_trees, max_depth = best_rf_row.max_depth,
+            min_samples_leaf = best_rf_row.min_leaf, rng_seed = 20260223)
 m_rf = classification_metrics(labels, r_rf.predictions)
 println("Best Balanced RF LOOCV: $(sum(r_rf.predictions .== labels))/$(length(labels)) ($(round(r_rf.accuracy * 100, digits=1))%)")
-println("  n_trees=$(best_rf_row.n_trees)")
+println("  n_trees=$(best_rf_row.n_trees), max_depth=$(best_rf_row.max_depth), min_leaf=$(best_rf_row.min_leaf)")
+println("  n_features per split: $(max(1, round(Int, sqrt(size(X_features, 2))))) (√$(size(X_features, 2)))")
 println("Balanced accuracy: $(round(m_rf.balanced_accuracy * 100, digits=1))%")
 println("Macro-F1: $(round(m_rf.macro_f1 * 100, digits=1))%")
 ```
@@ -664,10 +788,31 @@ first(svm_df, 8)
 
 ```{julia}
 best_svm_row = svm_df[1, :]
-println("Best SVM: $(best_svm_row.method)")
+println("Best SVM (selected on the same LOOCV table; optimistic): $(best_svm_row.method)")
 println("  $(best_svm_row.n_correct)/$(best_svm_row.n_total) ($(round(best_svm_row.accuracy * 100, digits=1))%)")
 println("  Balanced accuracy: $(round(best_svm_row.balanced_accuracy * 100, digits=1))%")
 println("  Macro-F1: $(round(best_svm_row.macro_f1 * 100, digits=1))%")
+
+# Honest estimate: outer LOOCV, with kernel/C selected in inner CV only.
+nested_svm = nested_loocv_svm(
+    X_features, labels;
+    kernels = [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear],
+    costs = [0.01, 0.1, 1.0, 10.0, 100.0],
+    use_pca = false,
+    inner_folds = 5,
+    rng_seed = 20260223
+)
+nested_svm_n_correct = sum(nested_svm.predictions .== labels)
+
+println("\nSVM Nested LOOCV (honest estimate):")
+println("  $(nested_svm_n_correct)/$(length(labels)) ($(round(nested_svm.accuracy * 100, digits=1))%)")
+println("  Balanced accuracy: $(round(nested_svm.balanced_accuracy * 100, digits=1))%")
+println("  Macro-F1: $(round(nested_svm.macro_f1 * 100, digits=1))%")
+
+params_df = DataFrame(nested_svm.params)
+param_usage = combine(groupby(params_df, [:kernel, :cost]), nrow => :n_outer_folds)
+sort!(param_usage, :n_outer_folds, rev = true)
+param_usage
 ```
 
 ### k-NN on Rips Wasserstein distance
@@ -682,8 +827,14 @@ The **Wasserstein distance** $W_q$ between two persistence diagrams is the cost 
 As a complementary approach, we compute pairwise Wasserstein distances between the Rips H1 persistence diagrams and classify with k-NN. Unlike the feature-based classifiers above, this operates directly on the persistence diagrams without extracting summary statistics, and is therefore less susceptible to information loss during featurization.
 
 ```{julia}
-D_wass1_rips = wasserstein_distance_matrix(pds_rips, q = 1)
-D_wass2_rips = wasserstein_distance_matrix(pds_rips, q = 2)
+D_wass1_rips_raw = wasserstein_distance_matrix(pds_rips, q = 1)
+D_wass2_rips_raw = wasserstein_distance_matrix(pds_rips, q = 2)
+
+D_wass1_rips = sanitize_distance_matrix(D_wass1_rips_raw)
+D_wass2_rips = sanitize_distance_matrix(D_wass2_rips_raw)
+
+println("Rips W1 non-finite entries (raw): $(count(!isfinite, D_wass1_rips_raw))")
+println("Rips W2 non-finite entries (raw): $(count(!isfinite, D_wass2_rips_raw))")
 
 knn_wass_results = []
 for (name, D) in [("Wass-1", D_wass1_rips), ("Wass-2", D_wass2_rips)]
@@ -708,11 +859,24 @@ knn_wass_df
 
 ```{julia}
 # Visualise one of the Wasserstein distance matrices
-p_wass = heatmap(D_wass1_rips,
-    xticks = (1:length(individuals), individuals),
-    yticks = (1:length(individuals), individuals),
+n_wass = size(D_wass1_rips, 1)
+tick_step = max(1, ceil(Int, n_wass / 12))
+tick_idx = collect(1:tick_step:n_wass)
+tick_labels = length(individuals) == n_wass ? individuals[tick_idx] : string.(tick_idx)
+finite_wass = D_wass1_rips[isfinite.(D_wass1_rips)]
+zmin, zmax = extrema(finite_wass)
+zmax = zmax <= zmin ? zmin + 1e-6 : zmax
+
+p_wass = heatmap(
+    D_wass1_rips,
+    xticks = (tick_idx, tick_labels),
+    yticks = (tick_idx, tick_labels),
     title = "Rips Wasserstein-1 distance",
-    color = :viridis, xrotation = 90, size = (750, 700))
+    color = :viridis,
+    clims = (zmin, zmax),
+    xrotation = 90,
+    size = (900, 800),
+)
 display(p_wass)
 ```
 
@@ -736,11 +900,10 @@ push!(all_results, (method = "Balanced RF (T=$(best_rf_row.n_trees))",
     n_correct = sum(r_rf.predictions .== labels), n_total = length(labels),
     accuracy = r_rf.accuracy, balanced_accuracy = m_rf.balanced_accuracy))
 
-# Best SVM
-best_svm = svm_df[1, :]
-push!(all_results, (method = best_svm.method,
-    n_correct = best_svm.n_correct, n_total = best_svm.n_total,
-    accuracy = best_svm.accuracy, balanced_accuracy = best_svm.balanced_accuracy))
+# SVM (nested LOOCV honest estimate)
+push!(all_results, (method = "SVM (Nested LOOCV)",
+    n_correct = nested_svm_n_correct, n_total = length(labels),
+    accuracy = nested_svm.accuracy, balanced_accuracy = nested_svm.balanced_accuracy))
 
 # k-NN on Wasserstein (best per distance)
 for name in ["Wass-1", "Wass-2"]
@@ -754,6 +917,120 @@ end
 results_df = DataFrame(all_results)
 sort!(results_df, :accuracy, rev = true)
 results_df
+```
+
+## Top-2 accuracy {#sec-top2}
+
+A single-label classifier must pick exactly one family. Here we relax this to **top-2**: the model returns the two most probable families and the prediction is considered correct if the true family is among them. This is a useful diagnostic for borderline cases where two families look very similar.
+
+We re-run LOOCV for the best balanced RF, collecting class probabilities via `apply_forest_proba`.
+
+```{julia}
+using DecisionTree: build_forest, apply_forest, apply_forest_proba
+using Random: shuffle!
+
+function loocv_rf_top2(X::Matrix, labels::Vector{String};
+                       n_trees::Int = 500,
+                       max_depth::Int = -1,
+                       min_samples_leaf::Int = 1,
+                       top_k::Int = 2,
+                       rng_seed::Int = 20260223)
+    # Inline balanced bootstrap (mirrors TDAfly.Analysis._balanced_bootstrap_indices)
+    function _bal_boot(y; rng)
+        classes  = sort(unique(y))
+        target_n = maximum(count(==(c), y) for c in classes)
+        idx = Int[]
+        for cls in classes
+            cls_idx = findall(==(cls), y)
+            append!(idx, rand(rng, cls_idx, target_n))
+        end
+        shuffle!(rng, idx)
+        idx
+    end
+
+    Xclean = sanitize_feature_matrix(X)
+    n = size(Xclean, 1)
+    top1_preds   = Vector{String}(undef, n)
+    topk_correct = falses(n)
+
+    for i in 1:n
+        train_idx     = setdiff(1:n, i)
+        X_train       = Xclean[train_idx, :]
+        y_train       = labels[train_idx]
+        train_classes = sort(unique(y_train))
+
+        rng     = MersenneTwister(rng_seed + i)
+        bal_idx = _bal_boot(y_train; rng = rng)
+        X_bal   = X_train[bal_idx, :]
+        y_bal   = y_train[bal_idx]
+
+        n_features = max(1, round(Int, sqrt(size(X_bal, 2))))
+        model = build_forest(y_bal, X_bal, n_features, n_trees, 0.7,
+                              max_depth, min_samples_leaf; rng = rng)
+
+        top1_preds[i] = apply_forest(model, Xclean[i, :])
+
+        # Probability vector (one entry per train_classes)
+        proba        = apply_forest_proba(model, Xclean[i, :], train_classes)
+        topk_idx     = sortperm(proba, rev = true)[1:min(top_k, length(train_classes))]
+        topk_classes = train_classes[topk_idx]
+        topk_correct[i] = labels[i] in topk_classes
+    end
+
+    top1_acc = mean(top1_preds .== labels)
+    topk_acc = mean(topk_correct)
+    (; top1_accuracy = top1_acc, topk_accuracy = topk_acc,
+       top1_predictions = top1_preds, topk_correct = topk_correct)
+end
+
+r_top2 = loocv_rf_top2(X_features, labels;
+                        n_trees          = best_rf_row.n_trees,
+                        max_depth        = best_rf_row.max_depth,
+                        min_samples_leaf = best_rf_row.min_leaf)
+
+n1 = sum(r_top2.top1_predictions .== labels)
+n2 = sum(r_top2.topk_correct)
+println("Top-1 accuracy : $(n1)/$(length(labels)) ($(round(r_top2.top1_accuracy*100, digits=1))%)")
+println("Top-2 accuracy : $(n2)/$(length(labels)) ($(round(r_top2.topk_accuracy*100, digits=1))%)")
+println("Gain from top-2: +$(n2 - n1) correctly recovered")
+```
+
+```{julia}
+# Per-family breakdown: top-1 vs top-2
+top2_family_df = DataFrame(
+    family        = String[],
+    n_total       = Int[],
+    top1_correct  = Int[],
+    top2_correct  = Int[],
+    top1_acc_pct  = Float64[],
+    top2_acc_pct  = Float64[],
+)
+
+for f in sort(unique(labels))
+    idx   = findall(==(f), labels)
+    n_f   = length(idx)
+    c1    = count(i -> r_top2.top1_predictions[i] == labels[i], idx)
+    c2    = count(i -> r_top2.topk_correct[i], idx)
+    push!(top2_family_df, (f, n_f, c1, c2,
+          round(c1 / n_f * 100, digits=1),
+          round(c2 / n_f * 100, digits=1)))
+end
+
+sort!(top2_family_df, :top1_acc_pct)
+top2_family_df
+```
+
+```{julia}
+# Bar chart comparing top-1 vs top-2 per family
+families_sorted = top2_family_df.family
+x = 1:length(families_sorted)
+bar(x .- 0.2, top2_family_df.top1_acc_pct, bar_width = 0.35,
+    label = "Top-1", color = :steelblue, alpha = 0.85)
+bar!(x .+ 0.2, top2_family_df.top2_acc_pct, bar_width = 0.35,
+     label = "Top-2", color = :coral, alpha = 0.85,
+     xticks = (x, families_sorted), xrotation = 45,
+     ylabel = "% correct", title = "Top-1 vs Top-2 accuracy per family",
+     legend = :bottomright, size = (900, 500))
 ```
 
 ## Which features drive the classification?
@@ -798,30 +1075,50 @@ top_imp
 ```{julia}
 topk_imp = min(15, nrow(top_imp))
 
-bar(
-    top_imp.feature[1:topk_imp],
-    top_imp.importance[1:topk_imp],
-    xlabel = "Feature",
-    ylabel = "Normalized impurity importance",
-    title = "RF feature importance (top $(topk_imp))",
-    legend = false,
-    xrotation = 45,
-    size = (1100, 550),
-)
+if topk_imp == 0
+    println("No nonzero RF importances to plot.")
+    p_rf_imp = plot(title = "RF feature importance (no nonzero features)", legend = false)
+else
+    rf_ord = sortperm(top_imp.importance[1:topk_imp])
+    rf_feat_plot = top_imp.feature[1:topk_imp][rf_ord]
+    rf_imp_plot = top_imp.importance[1:topk_imp][rf_ord]
+    rf_xmax = 1.1 * max(1e-6, maximum(rf_imp_plot))
+
+    p_rf_imp = bar(
+        1:topk_imp,
+        rf_imp_plot,
+        orientation = :horizontal,
+        yticks = (1:topk_imp, rf_feat_plot),
+        xlabel = "Normalized impurity importance",
+        ylabel = "Feature",
+        title = "RF feature importance (top $(topk_imp))",
+        legend = false,
+        fillcolor = :steelblue,
+        linecolor = :black,
+        linewidth = 0.5,
+        xlims = (0.0, rf_xmax),
+        size = (1200, 700),
+    )
+end
+
+display(p_rf_imp)
+p_rf_imp
 ```
 
-## Feature ablation: Rips vs Radial
+## Feature ablation
 
 ```{julia}
 # ── Test each filtration alone and combined ─────────────────────────────────
+stats_dir_all = hcat([stats_dir_h0[n] for n in direction_names]...)
+
 ablation_sets = [
-    ("Rips H1 only",              hcat(stats_rips)),
-    ("Radial H1 only",            hcat(stats_radial)),
-    ("Radial H0 only",            hcat(stats_radial_h0)),
-    ("Radial H0 + H1",            hcat(stats_radial, stats_radial_h0)),
-    ("Rips + Radial H0",          hcat(stats_rips, stats_radial_h0)),
-    ("Rips + Radial H1",          hcat(stats_rips, stats_radial)),
-    ("Rips + Radial H0+H1 (all)", X_features),
+    ("Rips H1 only",                  hcat(stats_rips)),
+    ("Radial H0 only",                hcat(stats_radial_h0)),
+    ("Dir H0 only (4 dirs)",          stats_dir_all),
+    ("Rips + Radial H0",              hcat(stats_rips, stats_radial_h0)),
+    ("Rips + Dir H0",                 hcat(stats_rips, stats_dir_all)),
+    ("Radial H0 + Dir H0",            hcat(stats_radial_h0, stats_dir_all)),
+    ("All (Rips + Radial H0 + Dir H0)", X_features),
 ]
 
 ablation_results = []
@@ -901,7 +1198,62 @@ heatmap(cm_nested.matrix,
         xrotation = 45, size = (700, 600))
 ```
 
-### Confidence interval for best classifier
+### Misclassified wings: visual inspection
+
+For each misclassified specimen we show the wing image and radial filtration alongside the 4 nearest neighbours (by Euclidean distance in the z-scored feature space). This helps understand whether errors are due to genuine visual ambiguity or artefacts of segmentation.
+
+```{julia}
+# z-score the feature matrix so all features have equal weight
+X_z = zscore_normalize(X_features)
+
+# Pairwise Euclidean distances between all specimens
+n_all = size(X_z, 1)
+D_feat = zeros(n_all, n_all)
+for i in 1:n_all, j in i+1:n_all
+    d = sqrt(sum((X_z[i, :] .- X_z[j, :]).^2))
+    D_feat[i, j] = D_feat[j, i] = d
+end
+
+misclassified_idx = findall(nested_rf.predictions .!= labels)
+println("Misclassified samples ($(length(misclassified_idx)) / $(length(labels))):")
+for i in misclassified_idx
+    println("  [$(i)] $(individuals[i])  true=$(labels[i])  predicted=$(nested_rf.predictions[i])")
+end
+```
+
+```{julia}
+# For each misclassified wing, show 2 rows × (1 + K_NEIGHBORS) columns:
+# (wing_panel / radial_panel are defined in the radial gallery section above)
+#   top row    = wing image
+#   bottom row = radial filtration
+K_NEIGHBORS = 4
+N_COLS = K_NEIGHBORS + 1
+
+for idx in misclassified_idx
+    dists = [(D_feat[idx, j], j) for j in 1:n_all if j != idx]
+    sort!(dists)
+    neighbor_idx = [j for (_, j) in dists[1:K_NEIGHBORS]]
+
+    all_idx = [idx; neighbor_idx]
+    titles = [
+        "MISCLASSIFIED\n$(individuals[idx])\ntrue: $(labels[idx]) | pred: $(nested_rf.predictions[idx])";
+        ["NN#$(k): $(individuals[nidx])\n$(labels[nidx]) | d=$(round(D_feat[idx, nidx], digits=2))"
+         for (k, nidx) in enumerate(neighbor_idx)]
+    ]
+
+    wing_panels   = [wing_panel(i;   title_str = t) for (i, t) in zip(all_idx, titles)]
+    radial_panels = [radial_panel(i; title_str = (i == idx ? "radial filtration" : "")) for i in all_idx]
+
+    # Plots.jl fills layout = (2, N_COLS) row-by-row:
+    # row 1 → all wing images, row 2 → all radial filtrations
+    p = plot([wing_panels; radial_panels]...,
+             layout = (2, N_COLS),
+             size = (260 * N_COLS, 500))
+    display(p)
+end
+```
+
+
 
 ```{julia}
 best_row = results_df[1, :]
@@ -913,18 +1265,18 @@ println("95% Wilson CI: [$(round(ci.lower * 100, digits=1))%, $(round(ci.upper *
 
 ## Discussion
 
-We applied two TDA filtration strategies --- Vietoris-Rips and radial --- to classify Diptera families from wing venation images, extracting 19 extended summary statistics per persistence diagram.
+We applied three TDA filtration strategies --- Vietoris-Rips, radial, and directional --- to classify Diptera families from wing venation images, extracting 19 extended summary statistics per persistence diagram.
 
 ### Key findings
 
-1. **Two filtrations capture complementary information**: The Vietoris-Rips filtration on point-cloud samples captures the **global loop structure** of the wing venation (number and prominence of wing cells). The radial filtration captures the **center-to-periphery organization**: how veins and cells are arranged spatially from the wing base outward.
+1. **Three filtrations capture complementary information**: The Vietoris-Rips filtration on point-cloud samples captures the **global loop structure** of the wing venation (number and prominence of wing cells). The radial H0 filtration captures the **center-to-periphery organization**: how vein segments merge as the filtration grows outward from the centroid. The directional H0 filtrations capture **vein connectivity along four axes** (horizontal, vertical, and both diagonals), encoding how disconnected components merge under directional sweeps.
 
-2. **Extended summary statistics are sufficient**: The 19-feature extended statistics (count, max/total persistence, quantiles, entropy, skewness, kurtosis, median birth/death, etc.) capture the essential information from each persistence diagram. With 3 diagrams × 19 features = 57 total features for 72 samples, the feature-to-sample ratio stays reasonable (~0.8:1), reducing overfitting risk.
+2. **Extended summary statistics are sufficient**: The 19-feature extended statistics (count, max/total persistence, quantiles, entropy, skewness, kurtosis, median birth/death, etc.) capture the essential information from each persistence diagram. With 6 diagrams × 19 features = 114 total features for 72 samples, the feature-to-sample ratio is higher (~1.6:1), but regularized classifiers (RF, SVM) handle this well.
 
-3. **Feature ablation reveals which filtrations matter**: The ablation study shows whether Rips alone, radial alone, or the combination gives the best performance. This provides evidence about whether global topology (Rips) or spatial organization (radial) is more discriminative.
+3. **Feature ablation reveals which filtrations matter**: The ablation study compares Rips alone, radial H0 alone, directional H0 alone, and their combinations. This provides evidence about whether global topology (Rips), radial organization (radial H0), or directional sweep information (directional H0) is most discriminative.
 
-4. **Why other filtrations were dropped**:
-   - **Directional (height) filtrations**: 8 sweep directions × H0+H1 produced a large feature set dominated by noise. On noisy binarized images with isolated pixels and incomplete segmentation, each sweep direction generates spurious topological features.
+4. **Why some filtrations were dropped**:
+   - **Radial H1**: On pixelated binary images, few genuine 1-cycles survive the radial filtration, making radial H1 mostly noise.
    - **EDT (Euclidean Distance Transform)**: On binarized images, the EDT is trivially related to the binary structure, providing little additional information beyond what Rips already captures.
    - **Cubical (grayscale sublevel-set)**: After binarization, the grayscale information is lost, so cubical persistence reduces to computing persistence on a binary image — equivalent to connected-component analysis.
 
@@ -946,3 +1298,4 @@ We applied two TDA filtration strategies --- Vietoris-Rips and radial --- to cla
 - Apply extended persistence or zigzag persistence for richer invariants
 - Investigate which specific topological features (e.g., how many loops, persistence of largest features) correspond to known vein characters in Diptera taxonomy
 - Try the analysis on non-binarized (grayscale) images, where EDT and cubical filtrations would be more informative
+- Explore directional H1 persistence on higher-quality images where loop detection under sweeps may be more reliable
