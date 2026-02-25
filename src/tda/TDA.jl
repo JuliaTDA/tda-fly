@@ -28,6 +28,16 @@ export # Persistence computations
     total_persistence,
     median_persistence,
     persistence_entropy,
-    pd_statistics
+    pd_statistics,
+    pd_statistics_extended,
+    skewness_persistence,
+    kurtosis_persistence,
+    median_death,
+    median_birth,
+    std_birth,
+    std_death,
+    mean_midlife,
+    persistence_range,
+    count_significant
 
 end

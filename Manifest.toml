@@ -1374,7 +1374,7 @@ version = "3.5.0"
 
 [[deps.MCPRepl]]
 deps = ["CommonMark", "Coverage", "DBInterface", "DataFrames", "Dates", "HTTP", "InteractiveUtils", "JSON", "Logging", "LoggingExtras", "Match", "OteraEngine", "Pkg", "Preferences", "Printf", "Profile", "REPL", "Random", "ReTest", "SHA", "SQLite", "Serialization", "Sockets", "Supposition", "TOML", "Tachikoma", "Test", "UUIDs", "ZMQ"]
-path = "../MCPRepl.jl"
+path = "/home/vituri/Documents/Github/MCPRepl.jl"
 uuid = "b62cb57a-788d-40b5-9d64-84a1dfc37ce3"
 version = "0.8.0"
 
@@ -2289,7 +2289,7 @@ uuid = "5a0628fe-1738-4658-9b6d-0b7605a9755b"
 version = "0.3.5"
 
 [[deps.TDAfly]]
-deps = ["CairoMakie", "Chain", "DataFrames", "DecisionTree", "Distances", "Distributions", "ImageFiltering", "ImageTransformations", "Images", "LIBSVM", "LinearAlgebra", "MetricSpaces", "MultivariateStats", "PersistenceDiagrams", "Plots", "ProgressMeter", "Random", "Reexport", "Revise", "Ripserer", "Statistics", "StatsBase", "StatsPlots"]
+deps = ["CairoMakie", "Chain", "DataFrames", "DecisionTree", "Distances", "Distributions", "ImageFiltering", "ImageTransformations", "Images", "LIBSVM", "LinearAlgebra", "MCPRepl", "MetricSpaces", "MultivariateStats", "PersistenceDiagrams", "Plots", "ProgressMeter", "Random", "Reexport", "Revise", "Ripserer", "Statistics", "StatsBase", "StatsPlots"]
 path = "."
 uuid = "5ee89b08-7b45-4496-b6d5-71693e11a84c"
 version = "0.1.0"

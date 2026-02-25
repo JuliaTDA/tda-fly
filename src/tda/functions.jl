@@ -4,7 +4,7 @@ using Ripserer
 using Plots
 using MetricSpaces
 using PersistenceDiagrams
-using StatsBase: mean, median, std, quantile
+using StatsBase: mean, median, std, quantile, skewness, kurtosis
 using LinearAlgebra: norm
 using Images: feature_transform, distance_transform
 
@@ -388,5 +388,136 @@ function pd_statistics(pd; threshold=0.0)
         quantile_persistence(pd, 0.90),
         persistence_entropy(pd),
         std_persistence(pd)
+    ]
+end
+
+# =============================================================================
+# Extended TDA Statistics
+# =============================================================================
+
+"""
+    skewness_persistence(pd)
+
+Skewness of persistence values. Positive skew = right tail (few very persistent features).
+"""
+function skewness_persistence(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    length(vals) < 3 ? 0.0 : skewness(vals)
+end
+
+"""
+    kurtosis_persistence(pd)
+
+Excess kurtosis of persistence values. High kurtosis = heavy tails.
+"""
+function kurtosis_persistence(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    length(vals) < 4 ? 0.0 : kurtosis(vals)
+end
+
+"""
+    median_death(pd)
+
+Median death time across finite intervals.
+"""
+function median_death(pd)
+    vals = [death(i) for i in pd if isfinite(death(i)) && isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : median(vals)
+end
+
+"""
+    median_birth(pd)
+
+Median birth time across finite intervals.
+"""
+function median_birth(pd)
+    vals = [birth(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : median(vals)
+end
+
+"""
+    std_birth(pd)
+
+Standard deviation of birth times.
+"""
+function std_birth(pd)
+    vals = [birth(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : std(vals)
+end
+
+"""
+    std_death(pd)
+
+Standard deviation of death times.
+"""
+function std_death(pd)
+    vals = [death(i) for i in pd if isfinite(death(i)) && isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : std(vals)
+end
+
+"""
+    mean_midlife(pd)
+
+Mean midlife = mean of (birth + death) / 2 across intervals.
+"""
+function mean_midlife(pd)
+    vals = [(birth(i) + death(i)) / 2 for i in pd if isfinite(death(i)) && isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : mean(vals)
+end
+
+"""
+    persistence_range(pd)
+
+Range of persistence values (max - min).
+"""
+function persistence_range(pd)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) ? 0.0 : maximum(vals) - minimum(vals)
+end
+
+"""
+    count_significant(pd; rel_threshold=0.1)
+
+Count intervals with persistence > rel_threshold * max_persistence.
+Captures how many features are "significant" relative to the largest.
+"""
+function count_significant(pd; rel_threshold=0.1)
+    vals = [persistence(i) for i in pd if isfinite(persistence(i))]
+    isempty(vals) && return 0.0
+    thresh = rel_threshold * maximum(vals)
+    Float64(count(>(thresh), vals))
+end
+
+"""
+    pd_statistics_extended(pd; threshold=0.0)
+
+Extract an extended feature vector from a persistence diagram.
+Returns 19 features:
+[count, max_pers, total_pers, total_pers2, q10, q25, median, q75, q90,
+ entropy, std_pers, skewness, kurtosis,
+ median_birth, median_death, std_birth, std_death,
+ mean_midlife, persistence_range]
+"""
+function pd_statistics_extended(pd; threshold=0.0)
+    [
+        Float64(count_intervals(pd; threshold=threshold)),
+        max_persistence(pd),
+        total_persistence(pd; p=1),
+        total_persistence(pd; p=2),
+        quantile_persistence(pd, 0.10),
+        quantile_persistence(pd, 0.25),
+        median_persistence(pd),
+        quantile_persistence(pd, 0.75),
+        quantile_persistence(pd, 0.90),
+        persistence_entropy(pd),
+        std_persistence(pd),
+        skewness_persistence(pd),
+        kurtosis_persistence(pd),
+        median_birth(pd),
+        median_death(pd),
+        std_birth(pd),
+        std_death(pd),
+        mean_midlife(pd),
+        persistence_range(pd),
     ]
 end
