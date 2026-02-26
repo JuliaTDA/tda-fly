@@ -53,7 +53,7 @@ default(fmt = :png, dpi = 180)
 
 ```{julia}
 #| include: false
-1
+2
 ```
 
 ## Introduction
@@ -67,7 +67,7 @@ We employ two complementary filtration strategies:
 1. **Vietoris-Rips filtration** on point-cloud samples of wing silhouettes --- captures global loop structure
 2. **Radial filtration** from the wing centroid to the periphery --- captures how vein topology is organized from center outward
 
-For each filtration, we compute both **H0** (connected components / vein branching) and **H1** (loops / enclosed cells) persistence, then extract extended summary statistics (19 interpretable features per diagram) and classify using simple, explainable models (LDA, Decision Trees, Random Forests). The goal is to find interpretable topological criteria for family identification.
+For each filtration, we compute both **H0** (connected components / vein branching) and **H1** (loops / enclosed cells) persistence, then extract extended summary statistics (17 interpretable features per diagram after dropping skewness and kurtosis) and classify using simple, explainable models (LDA, Decision Trees, Random Forests). The goal is to find interpretable topological criteria for family identification.
 
 ::: {.callout-note}
 ## Why only two filtrations?
@@ -456,12 +456,11 @@ end;
 
 ### Extended summary statistics {#sec-statistics}
 
-We extract 19 summary statistics from each persistence diagram using `pd_statistics_extended`:
+We extract extended summary statistics from each persistence diagram using `pd_statistics_extended`, then remove **skewness** and **kurtosis** (near-zero relevance in tree-based models):
 
 - **Count** of intervals, **max/total/total²** persistence
 - **Quantiles** (10th, 25th, 50th, 75th, 90th)
 - **Entropy**, **std** of persistence
-- **Skewness**, **kurtosis** of persistence distribution
 - **Median birth**, **median death**, **std birth**, **std death**
 - **Mean midlife** = mean of (birth + death)/2
 - **Persistence range** = max - min persistence
@@ -470,7 +469,7 @@ We extract 19 summary statistics from each persistence diagram using `pd_statist
 using DecisionTree
 using Random: MersenneTwister
 
-stat_names_ext = [
+all_stat_names_ext = [
     "count", "max_pers", "total_pers", "total_pers2",
     "q10", "q25", "median", "q75", "q90",
     "entropy", "std_pers",
@@ -479,15 +478,24 @@ stat_names_ext = [
     "mean_midlife", "pers_range"
 ]
 
-stats_rips = collect(hcat([pd_statistics_extended(pd) for pd in pds_rips]...)')
-stats_radial_h0 = collect(hcat([pd_statistics_extended(pd) for pd in pds_radial_h0]...)')
+drop_stat_names = Set(["skewness", "kurtosis"])
+keep_stat_idx = findall(s -> !(s in drop_stat_names), all_stat_names_ext)
+stat_names_ext = all_stat_names_ext[keep_stat_idx]
 
+stats_rips_raw = collect(hcat([pd_statistics_extended(pd) for pd in pds_rips]...)')
+stats_radial_h0_raw = collect(hcat([pd_statistics_extended(pd) for pd in pds_radial_h0]...)')
+stats_rips = stats_rips_raw[:, keep_stat_idx]
+stats_radial_h0 = stats_radial_h0_raw[:, keep_stat_idx]
+
+stats_dir_h0_raw = Dict{String, Matrix}()
 stats_dir_h0 = Dict{String, Matrix}()
 for name in direction_names
-    stats_dir_h0[name] = collect(hcat([pd_statistics_extended(pd) for pd in pds_dir_h0[name]]...)')
+    stats_dir_h0_raw[name] = collect(hcat([pd_statistics_extended(pd) for pd in pds_dir_h0[name]]...)')
+    stats_dir_h0[name] = stats_dir_h0_raw[name][:, keep_stat_idx]
 end
 
-println("Statistics per diagram: $(length(stat_names_ext)) features")
+println("Dropped stats: $(join(sort(collect(drop_stat_names)), ", "))")
+println("Statistics per diagram retained: $(length(stat_names_ext)) features")
 println("  Rips H1: $(size(stats_rips))")
 println("  Radial H0: $(size(stats_radial_h0))")
 for name in direction_names
@@ -529,18 +537,19 @@ We build the feature matrix from the extended summary statistics of all filtrati
 labels = families
 
 X_features = hcat(
-    stats_rips,                 # 19 features: Rips H1
-    stats_radial_h0,            # 19 features: Radial H0
-    stats_dir_h0["horiz"],      # 19 features: Dir H0 horizontal
-    stats_dir_h0["vert"],       # 19 features: Dir H0 vertical
-    stats_dir_h0["diag1"],      # 19 features: Dir H0 diagonal 1
-    stats_dir_h0["diag2"],      # 19 features: Dir H0 diagonal 2
+    stats_rips,                 # 17 features: Rips H1
+    stats_radial_h0,            # 17 features: Radial H0
+    stats_dir_h0["horiz"],      # 17 features: Dir H0 horizontal
+    stats_dir_h0["vert"],       # 17 features: Dir H0 vertical
+    stats_dir_h0["diag1"],      # 17 features: Dir H0 diagonal 1
+    stats_dir_h0["diag2"],      # 17 features: Dir H0 diagonal 2
 ) |> sanitize_feature_matrix
 
 feature_blocks = ["Rips_H1", "Radial_H0", "Dir_H0_horiz", "Dir_H0_vert", "Dir_H0_diag1", "Dir_H0_diag2"]
 feature_names = ["$(block)__$(stat)" for block in feature_blocks for stat in stat_names_ext]
 
 println("Feature matrix: $(size(X_features))")
+println("  Retained stats per diagram: $(length(stat_names_ext))")
 println("  $(size(X_features, 2)) features × $(size(X_features, 1)) samples")
 println("  Feature-to-sample ratio: $(round(size(X_features, 2) / size(X_features, 1), digits=2))")
 ```
@@ -618,7 +627,7 @@ first(tree_results, 10)
 best_tree = tree_results[1, :]
 
 # Build on full data with the best hyperparameters.
-# n_subfeatures = size(X_features, 2) means ALL 114 features are candidates at every split.
+# n_subfeatures = size(X_features, 2) means all retained features are candidates at every split.
 tree_model = DecisionTree.build_tree(
     labels, X_features, size(X_features, 2),
     best_tree.max_depth, best_tree.min_samples_leaf, 2, 0.0;
@@ -815,6 +824,125 @@ sort!(param_usage, :n_outer_folds, rev = true)
 param_usage
 ```
 
+### SVM with PCA dimensionality reduction
+
+To reduce overfitting risk, we project features with PCA inside each LOOCV fold, then train SVM on the reduced space. We scan different variance-retention targets and kernels/costs to identify a good dimensionality.
+
+```{julia}
+svm_pca_results = []
+for variance_ratio in [0.70, 0.80, 0.90, 0.95, 0.98]
+    for kernel in [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear]
+        for cost in [0.1, 1.0, 10.0]
+            kernel_name = kernel == LIBSVM.Kernel.RadialBasis ? "RBF" : "Linear"
+            r = loocv_svm_pca(
+                X_features, labels;
+                variance_ratio = variance_ratio,
+                kernel = kernel,
+                cost = cost
+            )
+            m = classification_metrics(labels, r.predictions)
+            push!(svm_pca_results, (
+                variance_ratio = variance_ratio,
+                median_n_components = r.median_n_components,
+                kernel = kernel_name,
+                cost = cost,
+                n_correct = sum(r.predictions .== labels),
+                n_total = length(labels),
+                accuracy = r.accuracy,
+                balanced_accuracy = m.balanced_accuracy,
+                macro_f1 = m.macro_f1,
+            ))
+        end
+    end
+end
+
+svm_pca_df = DataFrame(svm_pca_results)
+sort!(svm_pca_df, [:balanced_accuracy, :accuracy, :median_n_components], rev = [true, true, false])
+first(svm_pca_df, 10)
+```
+
+```{julia}
+best_svm_pca = svm_pca_df[1, :]
+
+println("Selected SVM+PCA setting (LOOCV table):")
+println("  kernel=$(best_svm_pca.kernel), C=$(best_svm_pca.cost)")
+println("  variance ratio=$(round(best_svm_pca.variance_ratio * 100, digits=1))%")
+println("  median retained dimensions=$(best_svm_pca.median_n_components)")
+println("  accuracy=$(best_svm_pca.n_correct)/$(best_svm_pca.n_total) ($(round(best_svm_pca.accuracy * 100, digits=1))%)")
+println("  balanced accuracy=$(round(best_svm_pca.balanced_accuracy * 100, digits=1))%")
+println("  macro-F1=$(round(best_svm_pca.macro_f1 * 100, digits=1))%")
+
+# Honest estimate with nested LOOCV, using the selected PCA variance ratio.
+nested_svm_pca = nested_loocv_svm(
+    X_features, labels;
+    kernels = [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear],
+    costs = [0.1, 1.0, 10.0],
+    use_pca = true,
+    variance_ratio = best_svm_pca.variance_ratio,
+    inner_folds = 5,
+    rng_seed = 20260223
+)
+nested_svm_pca_n_correct = sum(nested_svm_pca.predictions .== labels)
+
+println("\nSVM+PCA Nested LOOCV:")
+println("  $(nested_svm_pca_n_correct)/$(length(labels)) ($(round(nested_svm_pca.accuracy * 100, digits=1))%)")
+println("  Balanced accuracy: $(round(nested_svm_pca.balanced_accuracy * 100, digits=1))%")
+println("  Macro-F1: $(round(nested_svm_pca.macro_f1 * 100, digits=1))%")
+```
+
+### SVM using only Vietoris-Rips H1 statistics
+
+This analysis keeps only features from the 1D Vietoris-Rips barcode (`stats_rips`) and tests whether loop-based global topology alone is sufficient for classification.
+
+```{julia}
+X_rips_only = sanitize_feature_matrix(stats_rips)
+
+svm_rips_results = []
+for kernel in [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear]
+    for cost in [0.01, 0.1, 1.0, 10.0, 100.0]
+        kernel_name = kernel == LIBSVM.Kernel.RadialBasis ? "RBF" : "Linear"
+        r = loocv_svm(X_rips_only, labels; kernel = kernel, cost = cost)
+        m = classification_metrics(labels, r.predictions)
+        push!(svm_rips_results, (
+            method = "SVM Rips H1 ($kernel_name, C=$cost)",
+            n_correct = sum(r.predictions .== labels),
+            n_total = length(labels),
+            accuracy = r.accuracy,
+            balanced_accuracy = m.balanced_accuracy,
+            macro_f1 = m.macro_f1,
+        ))
+    end
+end
+
+svm_rips_df = DataFrame(svm_rips_results)
+sort!(svm_rips_df, :accuracy, rev = true)
+first(svm_rips_df, 8)
+```
+
+```{julia}
+best_svm_rips = svm_rips_df[1, :]
+println("Best SVM with Rips-only stats:")
+println("  $(best_svm_rips.method)")
+println("  $(best_svm_rips.n_correct)/$(best_svm_rips.n_total) ($(round(best_svm_rips.accuracy * 100, digits=1))%)")
+println("  Balanced accuracy: $(round(best_svm_rips.balanced_accuracy * 100, digits=1))%")
+println("  Macro-F1: $(round(best_svm_rips.macro_f1 * 100, digits=1))%")
+
+nested_svm_rips = nested_loocv_svm(
+    X_rips_only, labels;
+    kernels = [LIBSVM.Kernel.RadialBasis, LIBSVM.Kernel.Linear],
+    costs = [0.01, 0.1, 1.0, 10.0, 100.0],
+    use_pca = false,
+    inner_folds = 5,
+    rng_seed = 20260223
+)
+nested_svm_rips_n_correct = sum(nested_svm_rips.predictions .== labels)
+
+println("\nSVM Rips-only Nested LOOCV:")
+println("  $(nested_svm_rips_n_correct)/$(length(labels)) ($(round(nested_svm_rips.accuracy * 100, digits=1))%)")
+println("  Balanced accuracy: $(round(nested_svm_rips.balanced_accuracy * 100, digits=1))%")
+println("  Macro-F1: $(round(nested_svm_rips.macro_f1 * 100, digits=1))%")
+```
+
 ### k-NN on Rips Wasserstein distance
 
 ::: {.callout-note}
@@ -904,6 +1032,16 @@ push!(all_results, (method = "Balanced RF (T=$(best_rf_row.n_trees))",
 push!(all_results, (method = "SVM (Nested LOOCV)",
     n_correct = nested_svm_n_correct, n_total = length(labels),
     accuracy = nested_svm.accuracy, balanced_accuracy = nested_svm.balanced_accuracy))
+
+# SVM + PCA (nested LOOCV)
+push!(all_results, (method = "SVM + PCA (Nested LOOCV)",
+    n_correct = nested_svm_pca_n_correct, n_total = length(labels),
+    accuracy = nested_svm_pca.accuracy, balanced_accuracy = nested_svm_pca.balanced_accuracy))
+
+# SVM with Rips-only stats (nested LOOCV)
+push!(all_results, (method = "SVM Rips-only (Nested LOOCV)",
+    n_correct = nested_svm_rips_n_correct, n_total = length(labels),
+    accuracy = nested_svm_rips.accuracy, balanced_accuracy = nested_svm_rips.balanced_accuracy))
 
 # k-NN on Wasserstein (best per distance)
 for name in ["Wass-1", "Wass-2"]
@@ -1265,13 +1403,13 @@ println("95% Wilson CI: [$(round(ci.lower * 100, digits=1))%, $(round(ci.upper *
 
 ## Discussion
 
-We applied three TDA filtration strategies --- Vietoris-Rips, radial, and directional --- to classify Diptera families from wing venation images, extracting 19 extended summary statistics per persistence diagram.
+We applied three TDA filtration strategies --- Vietoris-Rips, radial, and directional --- to classify Diptera families from wing venation images, extracting extended summary statistics per persistence diagram and removing low-relevance moments (skewness and kurtosis).
 
 ### Key findings
 
 1. **Three filtrations capture complementary information**: The Vietoris-Rips filtration on point-cloud samples captures the **global loop structure** of the wing venation (number and prominence of wing cells). The radial H0 filtration captures the **center-to-periphery organization**: how vein segments merge as the filtration grows outward from the centroid. The directional H0 filtrations capture **vein connectivity along four axes** (horizontal, vertical, and both diagonals), encoding how disconnected components merge under directional sweeps.
 
-2. **Extended summary statistics are sufficient**: The 19-feature extended statistics (count, max/total persistence, quantiles, entropy, skewness, kurtosis, median birth/death, etc.) capture the essential information from each persistence diagram. With 6 diagrams × 19 features = 114 total features for 72 samples, the feature-to-sample ratio is higher (~1.6:1), but regularized classifiers (RF, SVM) handle this well.
+2. **Pruned extended statistics remain sufficient**: After removing skewness and kurtosis, we retain 17 statistics per diagram (count, max/total persistence, quantiles, entropy, median birth/death, etc.). With 6 diagrams × 17 features = 102 total features for 72 samples, the feature-to-sample ratio is ~1.42:1, reducing overfitting risk while preserving discriminative signal.
 
 3. **Feature ablation reveals which filtrations matter**: The ablation study compares Rips alone, radial H0 alone, directional H0 alone, and their combinations. This provides evidence about whether global topology (Rips), radial organization (radial H0), or directional sweep information (directional H0) is most discriminative.
 
