@@ -659,6 +659,7 @@ else
         color = :steelblue,
         linecolor = :black,
         linewidth = 0.25,
+        xlims = (0, 1.05),
         size = (760, 520),
     )
 end
