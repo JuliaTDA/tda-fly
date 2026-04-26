@@ -2,7 +2,7 @@
 
 julia_version = "1.12.4"
 manifest_format = "2.0"
-project_hash = "7a2a3d24c7a1d84a415ccdc1acb7c96cb674fed4"
+project_hash = "6d43715006693655244f2a82de3f76b49483312d"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1372,12 +1372,6 @@ git-tree-sha1 = "65ae3db6ab0e5b1b5f217043c558d9d1d33cc88d"
 uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
 version = "3.5.0"
 
-[[deps.MCPRepl]]
-deps = ["CommonMark", "Coverage", "DBInterface", "DataFrames", "Dates", "HTTP", "InteractiveUtils", "JSON", "Logging", "LoggingExtras", "Match", "OteraEngine", "Pkg", "Preferences", "Printf", "Profile", "REPL", "Random", "ReTest", "SHA", "SQLite", "Serialization", "Sockets", "Supposition", "TOML", "Tachikoma", "Test", "UUIDs", "ZMQ"]
-path = "/home/vituri/Documents/Github/MCPRepl.jl"
-uuid = "b62cb57a-788d-40b5-9d64-84a1dfc37ce3"
-version = "0.8.0"
-
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
 git-tree-sha1 = "282cadc186e7b2ae0eeadbd7a4dffed4196ae2aa"
@@ -2289,7 +2283,7 @@ uuid = "5a0628fe-1738-4658-9b6d-0b7605a9755b"
 version = "0.3.5"
 
 [[deps.TDAfly]]
-deps = ["CairoMakie", "Chain", "DataFrames", "DecisionTree", "Distances", "Distributions", "ImageFiltering", "ImageTransformations", "Images", "LIBSVM", "LinearAlgebra", "MCPRepl", "MetricSpaces", "MultivariateStats", "PersistenceDiagrams", "Plots", "ProgressMeter", "Random", "Reexport", "Revise", "Ripserer", "Statistics", "StatsBase", "StatsPlots"]
+deps = ["CairoMakie", "Chain", "DataFrames", "DecisionTree", "Distances", "Distributions", "ImageFiltering", "ImageTransformations", "Images", "LIBSVM", "LinearAlgebra", "MetricSpaces", "MultivariateStats", "PersistenceDiagrams", "Plots", "ProgressMeter", "Random", "Reexport", "Revise", "Ripserer", "Statistics", "StatsBase", "StatsPlots"]
 path = "."
 uuid = "5ee89b08-7b45-4496-b6d5-71693e11a84c"
 version = "0.1.0"
@@ -2316,18 +2310,6 @@ deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "Ordere
 git-tree-sha1 = "f2c1efbc8f3a609aadf318094f8fc5204bdaf344"
 uuid = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
 version = "1.12.1"
-
-[[deps.Tachikoma]]
-deps = ["Base64", "CodecZstd", "Dates", "Preferences"]
-path = "../Symbolic Mind/Tachikoma.jl"
-uuid = "468859d6-42d8-48b7-8ad9-1d312e0e3b0a"
-version = "0.1.0"
-weakdeps = ["ColorTypes", "CommonMark", "FreeTypeAbstraction", "Tables"]
-
-    [deps.Tachikoma.extensions]
-    TachikomaGifExt = ["FreeTypeAbstraction", "ColorTypes"]
-    TachikomaMarkdownExt = "CommonMark"
-    TachikomaTablesExt = "Tables"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
