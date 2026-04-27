@@ -4,3 +4,5 @@ _freeze/
 _manuscript/
 /.cache/
 materiais/Manual Diptera.pdf
+
+**/*.quarto_ipynb

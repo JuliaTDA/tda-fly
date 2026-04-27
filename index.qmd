@@ -20,7 +20,7 @@ keywords:
   - Diptera classification
   - Wing venation
 abstract: |
-  We use Topological Data Analysis (TDA) to describe Diptera wing venation and classify specimens at the family level. From 70 binarized wing images representing nine families, we extract two compact persistence summaries: H1 persistence from Vietoris-Rips filtrations of point-cloud samples and H0 persistence from radial filtrations of connected wing images. These 34 topological features are evaluated with a single balanced Random Forest model using repeated stratified 3-fold cross-validation. Because the dataset is imbalanced, performance is summarized primarily with macro-F1, macro-recall, family-level recall, and a row-normalized confusion matrix. We also use a feature-reduction screen to identify a smaller candidate set of topological summaries for biological interpretation.
+  We use Topological Data Analysis (TDA) to describe Diptera wing venation and classify specimens at the family level. From 70 binarized wing images representing nine families, we extract two compact persistence summaries: H1 persistence from Vietoris-Rips filtrations of point-cloud samples and H0 persistence from radial filtrations of connected wing images. These 34 topological features are evaluated with a single balanced Random Forest model using repeated stratified 3-fold cross-validation. Because the dataset is imbalanced, performance is summarized primarily with macro-F1, macro-recall, family-level recall, and a row-normalized confusion matrix. We also use a feature-reduction screen to identify a smaller candidate set of topological summaries for biological interpretation. A direct Wasserstein-distance baseline on Rips persistence diagrams is competitive with the Random Forest, suggesting that much of the taxonomic signal is already present in the Rips diagrams themselves.
 plain-language-summary: |
   We represent fly wings by the topology of their vein patterns. The representation keeps two complementary views of each wing: global loops in the vein network and how vein components organize from the center of the wing outward. A balanced Random Forest is used as the classifier, with validation designed to account for the small and imbalanced dataset.
 key-points:
@@ -28,6 +28,7 @@ key-points:
   - The final feature matrix contains 34 interpretable summary statistics for 70 specimens from nine families.
   - A balanced Random Forest evaluated by repeated stratified 3-fold cross-validation is summarized with macro-F1, macro-recall, per-family recall, and a row-normalized confusion matrix.
   - A feature-reduction screen identifies a compact candidate set of topological summaries for follow-up biological interpretation.
+  - Direct Wasserstein distances between Rips diagrams give competitive distance-based classification, while the Random Forest provides a modest gain and more interpretable feature summaries.
 date: last-modified
 bibliography: references.bib
 citation:
@@ -50,12 +51,12 @@ Pkg.activate(pwd())
 using TDAfly: findall_ids
 using TDAfly.Preprocessing: connect_pixel_components, image_to_array, image_to_r2, load_wing
 using TDAfly.TDA: pd_statistics_extended, radial_filtration, radial_pd_0d, rips_pd_1d
-using TDAfly.Analysis: classification_metrics, confusion_matrix, sanitize_feature_matrix
+using TDAfly.Analysis: classification_metrics, confusion_matrix, sanitize_distance_matrix, sanitize_feature_matrix
 using DataFrames
 using DecisionTree
 using DecisionTree: apply_forest, build_forest, build_tree
 using MetricSpaces: farthest_points_sample
-using PersistenceDiagrams: persistence
+using PersistenceDiagrams: Wasserstein, persistence
 using Plots: bar, default, display, heatmap, hline!, plot, plot!
 using ProgressMeter: @showprogress
 using Random: MersenneTwister, shuffle!
@@ -818,9 +819,382 @@ hline!(
 )
 ```
 
+## Rips Wasserstein distance baseline
+
+Earlier versions of this analysis used a direct distance-matrix approach: compute pairwise Wasserstein distances between the Rips H1 persistence diagrams, then classify by nearest neighbours. We revisit that idea here and add an average-linkage dendrogram. This is a deliberately "pure metric space" baseline because it uses the persistence diagrams only through a single pairwise distance matrix, without extracting interpretable summary features or fitting a flexible classifier.
+
+The Wasserstein constructor has two relevant choices: the Wasserstein order and the ground norm used to match points in the birth-death plane. The previous experiments used the default ground norm, so we compare those settings with Euclidean ground-norm variants.
+
+```{julia}
+#| warning: false
+#| message: false
+function rips_wasserstein_distance_matrix(pds; order = 1, ground_norm = Inf)
+    distance = Wasserstein(order, ground_norm)
+    n = length(pds)
+    D = zeros(Float64, n, n)
+    @showprogress "rips_wasserstein" for i in 1:n
+        for j in (i + 1):n
+            D[i, j] = D[j, i] = distance(pds[i], pds[j])
+        end
+    end
+    sanitize_distance_matrix(D)
+end
+
+function family_code(family)
+    uppercase(first(family, min(3, length(family))))
+end
+
+specimen_numbers = [split(individual, "-")[end] for individual in individuals]
+dendrogram_labels = [
+    "$(family_code(families[i]))$(specimen_numbers[i])" for i in eachindex(families)
+]
+
+wasserstein_specs = [
+    (distance = "W1_Linf", order = 1, ground_norm = Inf),
+    (distance = "W2_Linf", order = 2, ground_norm = Inf),
+    (distance = "W1_L2", order = 1, ground_norm = 2),
+    (distance = "W2_L2", order = 2, ground_norm = 2),
+]
+
+rips_wasserstein_distances = Dict{String, Matrix{Float64}}()
+for spec in wasserstein_specs
+    rips_wasserstein_distances[spec.distance] = rips_wasserstein_distance_matrix(
+        pds_rips;
+        order = spec.order,
+        ground_norm = spec.ground_norm,
+    )
+end
+```
+
+The dendrogram below uses average linkage on the W1 distance with the default ground norm. It should be read as an exploratory visualization of the diagram geometry, not as a supervised classifier.
+
+```{julia}
+#| fig-width: 8
+#| fig-height: 5.4
+#| out-width: "100%"
+function average_linkage_distance(D, cluster_a, cluster_b)
+    total = 0.0
+    n_pairs = 0
+    for i in cluster_a, j in cluster_b
+        total += D[i, j]
+        n_pairs += 1
+    end
+    total / n_pairs
+end
+
+function average_linkage_tree(D)
+    n = size(D, 1)
+    active = Dict(i => [i] for i in 1:n)
+    merges = Dict{Int, NamedTuple{(:left, :right, :height), Tuple{Int, Int, Float64}}}()
+    next_id = n + 1
+
+    while length(active) > 1
+        active_ids = sort(collect(keys(active)))
+        best_left = active_ids[1]
+        best_right = active_ids[2]
+        best_distance = Inf
+
+        for a_pos in 1:(length(active_ids) - 1)
+            for b_pos in (a_pos + 1):length(active_ids)
+                left_id = active_ids[a_pos]
+                right_id = active_ids[b_pos]
+                d = average_linkage_distance(D, active[left_id], active[right_id])
+                if d < best_distance
+                    best_left = left_id
+                    best_right = right_id
+                    best_distance = d
+                end
+            end
+        end
+
+        if minimum(active[best_left]) > minimum(active[best_right])
+            best_left, best_right = best_right, best_left
+        end
+
+        merges[next_id] = (left = best_left, right = best_right, height = best_distance)
+        active[next_id] = vcat(active[best_left], active[best_right])
+        delete!(active, best_left)
+        delete!(active, best_right)
+        next_id += 1
+    end
+
+    (root = only(keys(active)), merges = merges)
+end
+
+function dendrogram_order(node, merges, n_leaves)
+    node <= n_leaves && return [node]
+    merge = merges[node]
+    vcat(
+        dendrogram_order(merge.left, merges, n_leaves),
+        dendrogram_order(merge.right, merges, n_leaves),
+    )
+end
+
+function plot_average_linkage_dendrogram(D, labels; title_str = "")
+    n = size(D, 1)
+    tree = average_linkage_tree(D)
+    order = dendrogram_order(tree.root, tree.merges, n)
+    x_pos = Dict{Int, Float64}(leaf => pos for (pos, leaf) in enumerate(order))
+    y_pos = Dict{Int, Float64}(leaf => 0.0 for leaf in 1:n)
+    segments = Tuple{Float64, Float64, Float64, Float64}[]
+
+    function collect_segments(node)
+        node <= n && return
+        merge = tree.merges[node]
+        collect_segments(merge.left)
+        collect_segments(merge.right)
+
+        xl = x_pos[merge.left]
+        xr = x_pos[merge.right]
+        yl = y_pos[merge.left]
+        yr = y_pos[merge.right]
+        h = merge.height
+
+        push!(segments, (xl, xl, yl, h))
+        push!(segments, (xr, xr, yr, h))
+        push!(segments, (xl, xr, h, h))
+
+        x_pos[node] = (xl + xr) / 2
+        y_pos[node] = h
+    end
+
+    collect_segments(tree.root)
+
+    p = plot(
+        legend = false,
+        xlabel = "Specimens",
+        ylabel = "Average-linkage distance",
+        title = title_str,
+        xticks = (1:n, labels[order]),
+        xrotation = 90,
+        tickfontsize = 5,
+        size = (840, 540),
+    )
+    for (x1, x2, y1, y2) in segments
+        plot!(p, [x1, x2], [y1, y2], color = :gray35, linewidth = 1)
+    end
+    p
+end
+
+plot_average_linkage_dendrogram(
+    rips_wasserstein_distances["W1_Linf"],
+    dendrogram_labels;
+    title_str = "Average-linkage dendrogram from Rips W1 distances",
+)
+```
+
+To make the comparison with the Random Forest more explicit, we evaluate several distance-based classifiers with the same repeated stratified 3-fold split design used above. The classifier choices are intentionally simple: unweighted k-NN, inverse-distance weighted k-NN, and nearest-family average distance.
+
+```{julia}
+function majority_label(label_values::Vector{String})
+    counts = Dict{String, Int}()
+    for value in label_values
+        counts[value] = get(counts, value, 0) + 1
+    end
+    max_count = maximum(values(counts))
+    sort([label for (label, count) in counts if count == max_count])[1]
+end
+
+function vote_by_distance(neighbors; weighted = false, fallback = "")
+    isempty(neighbors) && return fallback
+    if weighted
+        weights = Dict{String, Float64}()
+        for (distance, label) in neighbors
+            weights[label] = get(weights, label, 0.0) + 1.0 / (distance + 1e-8)
+        end
+        best_weight = maximum(values(weights))
+        return sort([label for (label, weight) in weights if weight == best_weight])[1]
+    end
+
+    counts = Dict{String, Int}()
+    for (_, label) in neighbors
+        counts[label] = get(counts, label, 0) + 1
+    end
+    max_count = maximum(values(counts))
+    tied = [label for (label, count) in counts if count == max_count]
+    length(tied) == 1 && return only(tied)
+
+    average_distances = Dict(
+        label => mean([distance for (distance, neighbor_label) in neighbors if neighbor_label == label])
+        for label in tied
+    )
+    best_distance = minimum(values(average_distances))
+    sort([label for (label, distance) in average_distances if distance == best_distance])[1]
+end
+
+function predict_distance_knn_fold(D, labels, train_idx, test_idx; k = 1, weighted = false)
+    fallback = majority_label(labels[train_idx])
+    predictions = Vector{String}(undef, length(test_idx))
+    for (out_idx, sample_idx) in enumerate(test_idx)
+        neighbors = [
+            (D[sample_idx, train_idx_i], labels[train_idx_i])
+            for train_idx_i in train_idx
+            if isfinite(D[sample_idx, train_idx_i])
+        ]
+        sort!(neighbors, by = first)
+        selected = neighbors[1:min(k, length(neighbors))]
+        predictions[out_idx] = vote_by_distance(selected; weighted = weighted, fallback = fallback)
+    end
+    predictions
+end
+
+function predict_distance_centroid_fold(D, labels, train_idx, test_idx)
+    classes = sort(unique(labels[train_idx]))
+    predictions = Vector{String}(undef, length(test_idx))
+    for (out_idx, sample_idx) in enumerate(test_idx)
+        class_distances = Dict{String, Float64}()
+        for class in classes
+            class_idx = [i for i in train_idx if labels[i] == class]
+            class_distances[class] = mean(D[sample_idx, class_idx])
+        end
+        best_distance = minimum(values(class_distances))
+        predictions[out_idx] = sort([
+            class for (class, distance) in class_distances if distance == best_distance
+        ])[1]
+    end
+    predictions
+end
+
+function repeated_stratified_distance_cv(
+    D::Matrix,
+    labels::Vector{String};
+    classifier::Symbol,
+    k::Int = 1,
+    weighted::Bool = false,
+    folds::Int,
+    repeats::Int,
+    rng_seed::Int,
+)
+    Dclean = sanitize_distance_matrix(D)
+    n = length(labels)
+    repeat_metrics = DataFrame(
+        repeat = Int[],
+        accuracy = Float64[],
+        macro_f1 = Float64[],
+        macro_recall = Float64[],
+    )
+    pooled_true = String[]
+    pooled_pred = String[]
+
+    for repeat_id in 1:repeats
+        rng = MersenneTwister(rng_seed + repeat_id)
+        cv_folds = stratified_kfolds(labels; k = folds, rng = rng)
+        repeat_pred = Vector{String}(undef, n)
+
+        for fold_id in 1:folds
+            test_idx = sort(cv_folds[fold_id])
+            train_idx = setdiff(1:n, test_idx)
+            fold_pred = if classifier == :centroid
+                predict_distance_centroid_fold(Dclean, labels, train_idx, test_idx)
+            else
+                predict_distance_knn_fold(
+                    Dclean,
+                    labels,
+                    train_idx,
+                    test_idx;
+                    k = k,
+                    weighted = weighted,
+                )
+            end
+            repeat_pred[test_idx] = fold_pred
+        end
+
+        metrics = classification_metrics(labels, repeat_pred)
+        push!(repeat_metrics, (
+            repeat_id,
+            metrics.accuracy,
+            metrics.macro_f1,
+            metrics.balanced_accuracy,
+        ))
+        append!(pooled_true, labels)
+        append!(pooled_pred, repeat_pred)
+    end
+
+    pooled_metrics = classification_metrics(pooled_true, pooled_pred)
+    (repeat_metrics = repeat_metrics, pooled_metrics = pooled_metrics)
+end
+
+distance_classifier_specs = [
+    (classifier = :knn, label = "1-NN", k = 1, weighted = false),
+    (classifier = :knn, label = "3-NN", k = 3, weighted = false),
+    (classifier = :knn, label = "5-NN", k = 5, weighted = false),
+    (classifier = :knn, label = "3-NN weighted", k = 3, weighted = true),
+    (classifier = :knn, label = "5-NN weighted", k = 5, weighted = true),
+    (classifier = :centroid, label = "Nearest family average", k = 1, weighted = false),
+]
+
+wasserstein_cv_rows = NamedTuple[]
+for spec in wasserstein_specs
+    D = rips_wasserstein_distances[spec.distance]
+    for classifier_spec in distance_classifier_specs
+        result = repeated_stratified_distance_cv(
+            D,
+            labels;
+            classifier = classifier_spec.classifier,
+            k = classifier_spec.k,
+            weighted = classifier_spec.weighted,
+            folds = CV_K,
+            repeats = CV_REPEATS,
+            rng_seed = RNG_SEED + 200_000,
+        )
+        push!(wasserstein_cv_rows, (
+            distance = spec.distance,
+            classifier = classifier_spec.label,
+            accuracy = result.pooled_metrics.accuracy,
+            macro_f1 = result.pooled_metrics.macro_f1,
+            macro_recall = result.pooled_metrics.balanced_accuracy,
+        ))
+    end
+end
+
+wasserstein_cv_results = DataFrame(wasserstein_cv_rows)
+sort!(wasserstein_cv_results, [:macro_f1, :macro_recall, :accuracy], rev = true)
+wasserstein_cv_results.accuracy_percent = round.(wasserstein_cv_results.accuracy .* 100, digits = 1)
+wasserstein_cv_results.macro_f1_percent = round.(wasserstein_cv_results.macro_f1 .* 100, digits = 1)
+wasserstein_cv_results.macro_recall_percent = round.(wasserstein_cv_results.macro_recall .* 100, digits = 1)
+select(
+    first(wasserstein_cv_results, 12),
+    :distance,
+    :classifier,
+    :accuracy_percent,
+    :macro_f1_percent,
+    :macro_recall_percent,
+)
+```
+
+```{julia}
+best_wasserstein = wasserstein_cv_results[1, :]
+metric_vs_rf_summary = DataFrame(
+    method = ["Best Rips Wasserstein baseline", "Balanced Random Forest"],
+    representation = ["Rips H1 diagrams as a distance matrix", "Rips H1 + radial H0 summary features"],
+    classifier = [best_wasserstein.classifier, "Random Forest"],
+    accuracy_percent = round.([
+        best_wasserstein.accuracy,
+        cv_results.pooled_metrics.accuracy,
+    ] .* 100, digits = 1),
+    macro_f1_percent = round.([
+        best_wasserstein.macro_f1,
+        cv_results.pooled_metrics.macro_f1,
+    ] .* 100, digits = 1),
+    macro_recall_percent = round.([
+        best_wasserstein.macro_recall,
+        cv_results.pooled_metrics.balanced_accuracy,
+    ] .* 100, digits = 1),
+)
+metric_vs_rf_summary
+```
+
+The direct Wasserstein approach is more than a weak diagnostic baseline. Its best result is close to the feature-based Random Forest: the accuracy differs by about one percentage point, while macro-F1 and macro-recall differ by only a few percentage points. Given the small sample size, this gap should be interpreted cautiously rather than as clear evidence that the Random Forest is decisively superior.
+
+This result suggests that the Rips H1 persistence diagrams already contain substantial family-level signal. The Wasserstein pipeline is also conceptually simple: it keeps the diagrams as diagrams, compares them with an intrinsic distance, and uses nearest-neighbour classification. Its simplicity is mainly statistical and methodological, however, not necessarily computational, because Wasserstein distances require solving optimal matching problems between diagrams.
+
+The feature-based Random Forest remains useful, but for a more modest reason. It combines Rips H1 summaries with radial H0 summaries, can use nonlinear interactions among summary statistics, and gives feature-importance diagnostics for biological interpretation. The present results therefore do not show that a purely metric-space approach is poor. They show that Wasserstein distance is a strong baseline, and that feature extraction plus Random Forest offers a small performance gain together with better interpretability and flexibility.
+
 ## Discussion
 
-These results suggest that compact topological summaries of wing venation contain family-level signal. The two retained filtrations capture different information: Vietoris-Rips H1 summarizes global loop structure in the vein network, while radial H0 summarizes how connected vein components organize from the center of the wing outward.
+These results suggest that compact topological summaries of wing venation contain family-level signal. The two retained filtrations capture different information: Vietoris-Rips H1 summarizes global loop structure in the vein network, while radial H0 summarizes how connected vein components organize from the center of the wing outward. The direct Wasserstein baseline strengthens this conclusion: even without radial features or feature extraction, the Rips diagrams alone support competitive classification.
+
+The comparison between Wasserstein distance and Random Forest should be read as a tradeoff, not as a decisive ranking. The Random Forest gives a modest improvement in the current validation, but the gap is small for a dataset of this size. Wasserstein distance therefore remains an important baseline and a useful indication that the persistence diagrams themselves carry taxonomic structure. The advantage of the feature-based Random Forest is that it can combine complementary filtrations and provide interpretable feature rankings, not that it overwhelmingly outperforms the metric-space approach.
 
 The validation design is intentionally conservative for the current dataset. Because the dataset contains only 70 specimens and the family counts are uneven, the primary summaries are macro-F1 and macro-recall rather than overall correct rate. Repeating the stratified 3-fold split 30 times reduces dependence on a single partition and gives a clearer view of which families are stable or ambiguous.
 
