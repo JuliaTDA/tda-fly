@@ -14,3 +14,21 @@ execute:
 format:
   html:
     page-layout: full
+  pdf:
+    documentclass: scrartcl
+    papersize: a4
+    geometry:
+      - margin=1in
+    fig-width: 6
+    fig-height: 4
+    fig-pos: "H"
+    keep-tex: false
+    toc: false
+    number-sections: true
+    cite-method: biblatex
+    biblio-style: alphabetic
+    include-in-header:
+      text: |
+        \usepackage{float}
+        \usepackage{amsmath}
+        \usepackage{amssymb}

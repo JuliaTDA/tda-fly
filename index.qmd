@@ -1,6 +1,17 @@
 ---
 title: "Diptera wing classification using Topological Data Analysis"
 author:
+  - name: Sergio Tsuyoshi Ura
+    email: sergioura@gmail.com
+  - name: Northon Canevari Leme Penteado
+    email: northon.canevari@ufca.edu.br
+    affiliations:
+      - name: Universidade Federal do Cariri
+        department: Instituto de Formação de Educadores
+        city: Brejo Santo
+        region: CE
+        country: Brazil
+        postal-code: 63260-000
   - name: Guilherme Vituri F. Pinto
     orcid: 0000-0002-7813-8777
     corresponding: true
@@ -12,17 +23,17 @@ author:
       - Visualization
     affiliations:
       - Universidade Estadual Paulista
-  - name: Sergio Ura
-  - name: Northon
+  - name: Washington Mio
+  - name: Alice Kimie Miwa Libardi
 keywords:
   - Topological Data Analysis
   - Persistent homology
   - Diptera classification
   - Wing venation
 abstract: |
-  We use Topological Data Analysis (TDA) to describe Diptera wing venation and classify specimens at the family level. From 70 binarized wing images representing nine families, we extract two compact persistence summaries: H1 persistence from Vietoris-Rips filtrations of point-cloud samples and H0 persistence from radial filtrations of connected wing images. These 34 topological features are evaluated with a single balanced Random Forest model using repeated stratified 3-fold cross-validation. Because the dataset is imbalanced, performance is summarized primarily with macro-F1, macro-recall, family-level recall, and a row-normalized confusion matrix. We also use a feature-reduction screen to identify a smaller candidate set of topological summaries for biological interpretation. A direct Wasserstein-distance baseline on Rips persistence diagrams is competitive with the Random Forest, suggesting that much of the taxonomic signal is already present in the Rips diagrams themselves.
+  We apply tools from Topological Data Analysis (TDA) to classify Diptera families based on wing venation patterns. From 70 binarized wing images representing nine families, we extract two complementary persistence summaries: H1 persistence from Vietoris-Rips filtrations of point-cloud samples, capturing global loop structure of the vein network, and H0 persistence from radial filtrations of connected wing images, capturing how vein components organize from the centroid outward. Each diagram is converted into a vector of interpretable summary statistics, yielding 34 features per specimen. A single balanced Random Forest classifier is evaluated by repeated stratified 3-fold cross-validation, and performance is reported with macro-F1, macro-recall, per-family recall, and a row-normalized confusion matrix. A feature-reduction screen identifies a smaller candidate set of topological summaries for biological interpretation. As a complementary baseline, we classify the wings directly from pairwise Wasserstein distances between Rips persistence diagrams; this metric-space approach is competitive with the feature-based Random Forest, indicating that much of the taxonomic signal is already present in the Rips diagrams themselves.
 plain-language-summary: |
-  We represent fly wings by the topology of their vein patterns. The representation keeps two complementary views of each wing: global loops in the vein network and how vein components organize from the center of the wing outward. A balanced Random Forest is used as the classifier, with validation designed to account for the small and imbalanced dataset.
+  We represent fly wings by the topology of their vein patterns. The representation keeps two complementary views of each wing: global loops in the vein network, and how vein components organize from the center of the wing outward. A balanced Random Forest is used as the classifier, with validation designed to account for the small and imbalanced dataset.
 key-points:
   - Two TDA filtrations provide a compact representation of wing venation: Vietoris-Rips H1 and radial H0.
   - The final feature matrix contains 34 interpretable summary statistics for 70 specimens from nine families.
@@ -40,6 +51,10 @@ format:
     fig-width: 7
     fig-height: 4.8
     fig-align: center
+  pdf:
+    fig-width: 6
+    fig-height: 4
+    fig-pos: "H"
 ---
 
 ```{julia}
@@ -94,15 +109,33 @@ FEATURE_PERFORMANCE_TOLERANCE = 0.01
 
 Diptera wing venation is a classical taxonomic character: the arrangement of veins and enclosed cells varies among families and provides a natural morphological signature. Topological Data Analysis (TDA) is well suited to this problem because persistent homology summarizes connected components and loops in a way that is less tied to exact pixel coordinates than many raw image descriptors.
 
+### Related work
+
+Persistent homology has become a productive tool in biological morphology over the past decade; @amezquita2020shape provide a broad review across scales from molecules to whole organisms. The plant sciences have driven much of this work: @li2018topological used persistent homology to demarcate a 141-family leaf morphospace from 182{,}707 specimens, reporting roughly threefold better family-level classification than conventional landmark-based morphometrics; @li2018persistent showed that persistent homology features captured additional QTLs for leaf, fruit, and root shape compared with classical descriptors; @amezquita2022measuring used the Euler characteristic transform on X-ray CT scans of barley seeds to discriminate accessions; and @zhang2021mfcis combined persistent-homology features with deep learning to identify plant cultivars from leaf images, including aspects of leaf venation. Persistent homology has also been applied to branching biological structures: @li2017persistent treated branching plant architectures explicitly with persistent homology, and @kanari2018topological introduced the topological morphology descriptor for neuronal arbours using a radial-distance filtration from the soma. On the methodological side, @moon2023hypothesis develop hypothesis testing for vectorised persistence diagrams.
+
+Within image-based TDA, @garin2019topological established the radial filtration and the height filtration on binarized images as standard primitives, classifying MNIST digits by sublevel-set persistence on these filtrations. We adopt the radial filtration directly from that line of work.
+
+To our knowledge, persistent homology has not previously been applied to Diptera wing venation, and we are not aware of an insect-wing morphometric study using image-based persistent-homology descriptors. Existing topological work on insect wings has treated the venation as a graph and analysed it with classical network statistics rather than persistence. The present study brings a representation that has worked well for plants and neuronal morphology to insect wing morphology.
+
+### Contributions and scope
+
 We use two complementary filtrations: a Vietoris-Rips filtration on point-cloud samples of each wing, retaining H1 persistence to describe global loops; and a radial filtration on the connected binary wing image, retaining H0 persistence to describe how vein components merge from the center of the wing outward.
 
-The statistical goal is to test whether compact topological summaries carry family-level signal and to identify which summaries are most useful for prediction. To keep the validation aligned with the small and imbalanced dataset, we evaluate one balanced Random Forest model with repeated stratified 3-fold cross-validation and report macro-F1, macro-recall, family-level recall, and the confusion matrix.
+The statistical goal is to test whether compact topological summaries carry family-level signal and to identify which summaries are most useful for prediction. To keep the validation aligned with the small and imbalanced dataset, we evaluate one balanced Random Forest model with repeated stratified 3-fold cross-validation and report macro-F1, macro-recall, family-level recall, and the confusion matrix. We also evaluate a pure metric-space baseline — Wasserstein distance between Rips H1 diagrams with $k$-nearest-neighbour classification — to separate the contribution of feature engineering from that of the raw topological representation.
 
 ## Methods
 
 ### Data and preprocessing
 
-All wing images are stored in `images/processed`. File names encode the family and specimen identifier. We standardize family names, remove duplicated files that differ only by spacing or spelling variants, blur each image slightly, crop it, and resize it to 150 pixels in height.
+The dataset consists of 70 wing images covering nine Diptera families: *Asilidae*, *Bibionidae*, *Ceratopogonidae*, *Chironomidae*, *Rhagionidae*, *Sciaridae*, *Simuliidae*, *Tabanidae*, and *Tipulidae*. All images are stored in `images/processed`. File names encode the family and specimen identifier. We standardize family names, remove duplicated files that differ only by spacing or spelling variants, blur each image slightly, crop it, and resize it to 150 pixels in height.
+
+The preprocessing pipeline applies, in order, the following operations:
+
+- **Gaussian blur**, to close small gaps in the vein membranes so that the venation network remains connected after thresholding.
+- **Crop to the bounding box** of the foreground pixels, to standardize the spatial extent of the images.
+- **Connect pixel components**: many raw segmentations contain isolated noise pixels that are not part of the venation. We reduce each image to a single connected foreground component, prioritizing the largest one when several disconnected components are present.
+
+For the point-cloud representation used in the Vietoris-Rips filtration we sample 750 pixels from each wing using farthest-point sampling, which provides good coverage of the venation geometry while keeping the Rips computation tractable.
 
 ```{julia}
 all_paths = sort(readdir("images/processed", join = true))
@@ -165,12 +198,17 @@ end;
 
 ### Topological feature extraction
 
-We compute two persistence diagrams for each wing. First, we sample 750 points from the wing point cloud and compute H1 persistence from the Vietoris-Rips filtration. Second, we construct a connected binary image and compute H0 persistence from the radial filtration.
+Persistent homology is the central tool of Topological Data Analysis. Given a filtration of a simplicial complex, it tracks how topological features (connected components in dimension 0, loops in dimension 1, voids in dimension 2, and so on) appear and disappear as the filtration parameter grows. Each feature has a *birth* time, when it first appears, and a *death* time, when it gets filled in or merges into a previously existing feature. The collection of all (birth, death) pairs is the *persistence diagram*. Long-lived features represent stable shape information, while short-lived features are typically attributable to noise.
 
-::: {.callout-note}
-## Persistent homology overview
-Persistent homology tracks topological features as a filtration parameter changes. H0 records connected components; H1 records loops. Long-lived features are treated as more stable shape information than short-lived features.
-:::
+For each wing we compute two persistence diagrams from two complementary filtrations:
+
+#### Vietoris-Rips filtration on point clouds
+
+Given a finite set of points in $\mathbb{R}^n$, the Vietoris-Rips complex at scale $\varepsilon$ contains every subset of points that are pairwise within distance $\varepsilon$. As $\varepsilon$ grows from $0$, the complexes form a nested sequence — the Rips filtration. This is the most common filtration in TDA for point-cloud data. It is computationally expensive because all pairwise distances must be considered, which is why we work with subsamples of size 750 obtained by farthest-point sampling. We retain the H1 persistence of each Rips filtration, which encodes the global loop structure of the wing venation (the number and prominence of wing cells). We do not retain Rips H0: it contains 749 finite bars plus one infinite component, but the finite bars are dominated by inter-sample distances from farthest-point sampling rather than by intrinsic vein topology, and pilot experiments showed them to be redundant with the radial H0 features described below.
+
+#### Radial filtration
+
+The radial filtration was introduced by @garin2019topological for classifying binarized MNIST digits, drawing on the radial-distance descriptors of @kanari2018topological for neuronal morphology. It assigns to each foreground pixel a value equal to its distance from a chosen center, here taken to be the centroid of the wing. Sublevel-set persistence on this function captures how topological features are distributed from the center of the wing outward, which is complementary to the Rips filtration: it is sensitive to the spatial layout of the venation rather than to its global loop structure. We retain H0 persistence, which tracks how disconnected vein segments merge as the radial sweep grows outward. We do not retain radial H1 because pixelated binary images produce very few clean loops under this filtration and the resulting H1 diagram is dominated by noise.
 
 ```{julia}
 #| warning: false
@@ -273,7 +311,33 @@ plot(example_plots..., layout = (length(example_indices), 4), size = (760, 560))
 
 ### Summary statistics
 
-Each persistence diagram is converted into 19 summary statistics. We retain 17 statistics per diagram and exclude skewness and kurtosis because these tail-sensitive summaries are less reliable for small persistence diagrams. This gives 34 features per specimen.
+Each persistence diagram is converted into 19 summary statistics, of which we retain 17 per diagram. Let a persistence diagram be $D=\{(b_j,d_j):j=1,\ldots,n\}$ and write $\ell_j=d_j-b_j$ for the persistence (lifetime) of the $j$-th interval. Intervals with infinite death (the single infinite H0 bar, if present) are excluded from all statistics below. The retained statistics fall into four groups:
+
+**Counts and totals.**
+
+- Number of finite intervals: $n$.
+- Maximum persistence: $\max_j \ell_j$.
+- Total persistence: $\sum_j \ell_j$.
+- Total squared persistence: $\sum_j \ell_j^2$.
+
+**Quantiles of persistence values.** The 10th, 25th, 50th (median), 75th, and 90th empirical percentiles of $\{\ell_j\}$, together with the persistence range $\max_j \ell_j - \min_j \ell_j$.
+
+**Spread and shape.**
+
+- Standard deviation of persistence: $\sigma(\ell_j)$.
+- Persistence entropy [@rucco2016characterisation; @chintakunta2015entropy]: let $L = \sum_j \ell_j$ and $p_j = \ell_j / L$; then
+  $$
+  E(D) = -\sum_{j=1}^{n} p_j \log p_j.
+  $$
+  This is the (un-normalised) Shannon entropy of the persistence values rescaled to a probability distribution. Diagrams whose persistence mass is concentrated in a few long bars have low $E$; diagrams whose bars have comparable lifetimes have high $E$.
+
+**Birth, death, and midlife summaries.** Let births $\{b_j\}$ and finite deaths $\{d_j\}$ be the corresponding coordinates of the retained intervals. We compute the median of $\{b_j\}$, the median of $\{d_j\}$, $\sigma(b_j)$, $\sigma(d_j)$, and the mean midlife
+$$
+\bar{m}(D) = \frac{1}{n} \sum_{j=1}^{n} \frac{b_j + d_j}{2},
+$$
+where the midlife $(b_j + d_j)/2$ is computed per interval and then averaged.
+
+Skewness and kurtosis are computed but excluded from the feature set: they are tail-sensitive moments, and on the small persistence diagrams produced here they showed near-zero importance in tree-based models and added noise rather than signal. Two diagrams per wing × 17 statistics yields 34 features per specimen.
 
 ```{julia}
 all_stat_names_ext = [
@@ -350,6 +414,16 @@ p4 = boxplot(
 )
 plot(p1, p2, p3, p4, layout = (2, 2), size = (760, 560))
 ```
+
+### Design rationale: filtrations and representations not used
+
+The Rips H1 / radial H0 combination above was selected after pilot experiments with several additional filtrations and persistence representations. We record the discarded alternatives here, together with the diagnostic that ruled each one out, to make the design choices reproducible.
+
+- **Directional (height) filtrations.** Sweeping a hyperplane across the wing along several directions and computing H0 persistence was discarded because the binarized images are noisy enough that each sweep direction generates spurious topological features. Classifiers that exploit those features show inflated training accuracy that does not generalize.
+- **Radial H1.** On pixelated binary images, very few clean 1-cycles survive the radial filtration, so radial H1 is dominated by noise.
+- **Euclidean Distance Transform (EDT).** With binarized inputs, the EDT is nearly trivially related to the binary structure and adds little beyond what the Rips filtration already captures.
+- **Cubical (grayscale sublevel-set) filtration.** After binarization the grayscale information is lost, so cubical persistence reduces to a connected-component analysis of the binary image.
+- **Persistence images and Betti curves as classifier inputs.** These yield hundreds to thousands of features for only 70 specimens, and the resulting classifiers were not robust under nested cross-validation. Compact summary statistics are more interpretable and more reliable on this dataset.
 
 ## Classification
 
@@ -570,7 +644,7 @@ family_metrics
 
 ### Confusion matrix
 
-The confusion matrix below is row-normalized, so each row sums to one and can be read as the distribution of predicted families for a given true family.
+The confusion matrix below is row-normalized, so each row sums to one and can be read as the distribution of predicted families for a given true family. The matrix pools held-out predictions across all 30 cross-validation repeats, so each specimen contributes 30 predictions rather than one. This stabilizes the visual pattern but does not increase the effective sample size: per-family precision is still governed by the original 3-12 specimens per family, not by the 90-360 pooled predictions. Confidence in any single off-diagonal cell should therefore be tempered by the small underlying support, and the `support` column of `family_metrics` similarly reflects this 30-fold inflation.
 
 ```{julia}
 #| fig-width: 7
@@ -671,6 +745,8 @@ end
 To identify a compact feature set for biological interpretation, we use the Random Forest importance ranking as a reduction path. We evaluate nested subsets of the top-ranked features and select the smallest subset whose screening performance remains within one percentage point of the full 34-feature model for both pooled accuracy and pooled macro-F1. The selected subset is then re-evaluated with the full repeated stratified 3-fold CV configuration.
 
 This procedure is intended to rank features for interpretation. It should not be treated as an independent performance estimate because the feature ranking is learned from the same dataset.
+
+Two caveats apply to the screen itself. First, the screen uses only `FEATURE_SCREEN_REPEATS = 10` cross-validation repeats — a third of what is used elsewhere — to keep its runtime tractable across all 34 candidate subset sizes. The screen estimates are therefore noisier than the headline 30-repeat results, and the 1-percentage-point tolerance band is wide enough that a subset can drift into or out of it by chance. Second, the threshold itself is compared against an estimate of the full-model performance from the same 10-repeat screen, so both sides of the comparison share the same noise floor. The selected feature count should be read as approximate, and the re-evaluation with the full 30-repeat schedule reported in the summary table is the value to trust.
 
 ```{julia}
 function evaluate_ranked_feature_subsets(
@@ -821,9 +897,9 @@ hline!(
 
 ## Rips Wasserstein distance baseline
 
-Earlier versions of this analysis used a direct distance-matrix approach: compute pairwise Wasserstein distances between the Rips H1 persistence diagrams, then classify by nearest neighbours. We revisit that idea here and add an average-linkage dendrogram. This is a deliberately "pure metric space" baseline because it uses the persistence diagrams only through a single pairwise distance matrix, without extracting interpretable summary features or fitting a flexible classifier.
+We complement the feature-based Random Forest with a pure metric-space baseline: compute pairwise Wasserstein distances between the Rips H1 persistence diagrams, then classify by nearest neighbours. This baseline assesses how much family-level signal is contained in the raw diagrams before any feature extraction, by using the persistence diagrams only through a single pairwise distance matrix, without extracting interpretable summary features or fitting a flexible classifier. If the metric-space baseline is competitive, the feature engineering is justified mainly by interpretability rather than by raw accuracy; if it is poor, the feature pipeline is doing real statistical work.
 
-The Wasserstein constructor has two relevant choices: the Wasserstein order and the ground norm used to match points in the birth-death plane. The previous experiments used the default ground norm, so we compare those settings with Euclidean ground-norm variants.
+The Wasserstein constructor has two relevant choices: the Wasserstein order $p$ and the ground norm used to match points in the birth-death plane. We compare $L^\infty$ (the standard bottleneck-style ground norm) and $L^2$ (Euclidean) ground norms, each at $p=1$ and $p=2$, for four variants in total.
 
 ```{julia}
 #| warning: false
@@ -1192,12 +1268,37 @@ The feature-based Random Forest remains useful, but for a more modest reason. It
 
 ## Discussion
 
-These results suggest that compact topological summaries of wing venation contain family-level signal. The two retained filtrations capture different information: Vietoris-Rips H1 summarizes global loop structure in the vein network, while radial H0 summarizes how connected vein components organize from the center of the wing outward. The direct Wasserstein baseline strengthens this conclusion: even without radial features or feature extraction, the Rips diagrams alone support competitive classification.
+These results suggest that compact topological summaries of wing venation contain family-level signal. The balanced Random Forest reaches a pooled accuracy of 67.7%, pooled macro-F1 of 65.9%, and pooled macro-recall of 66.9% across 30 repeats of stratified 3-fold cross-validation. The two retained filtrations capture different information: Vietoris-Rips H1 summarizes global loop structure in the vein network, while radial H0 summarizes how connected vein components organize from the center of the wing outward. The direct Wasserstein baseline strengthens this conclusion: even without radial features or feature extraction, the best Rips-only Wasserstein classifier (3-NN on the W1 distance with $L^\infty$ ground norm) reaches accuracy 66.8% and macro-F1 63.1% — within a few percentage points of the feature-based pipeline.
 
-The comparison between Wasserstein distance and Random Forest should be read as a tradeoff, not as a decisive ranking. The Random Forest gives a modest improvement in the current validation, but the gap is small for a dataset of this size. Wasserstein distance therefore remains an important baseline and a useful indication that the persistence diagrams themselves carry taxonomic structure. The advantage of the feature-based Random Forest is that it can combine complementary filtrations and provide interpretable feature rankings, not that it overwhelmingly outperforms the metric-space approach.
+The comparison between Wasserstein distance and Random Forest should be read as a tradeoff, not as a decisive ranking. The Random Forest gives a modest improvement in the current validation (roughly 0.9 percentage points of accuracy and 2.8 percentage points of macro-F1), but the gap is small for a dataset of this size. Wasserstein distance therefore remains an important baseline and a useful indication that the persistence diagrams themselves carry taxonomic structure. The advantage of the feature-based Random Forest is that it can combine complementary filtrations and provide interpretable feature rankings, not that it overwhelmingly outperforms the metric-space approach.
 
 The validation design is intentionally conservative for the current dataset. Because the dataset contains only 70 specimens and the family counts are uneven, the primary summaries are macro-F1 and macro-recall rather than overall correct rate. Repeating the stratified 3-fold split 30 times reduces dependence on a single partition and gives a clearer view of which families are stable or ambiguous.
 
-The feature-reduction results provide a candidate set of topological summaries for biological follow-up. Features retained in the essential set should be inspected against wing venation traits, including loop structure, the number of persistent components, and the scale at which vein components merge under the radial filtration.
+The feature-reduction screen returned an essential subset of 11 features (out of 34), achieving pooled accuracy 66.2% and pooled macro-F1 65.4% under the full 30-repeat schedule — within roughly one and a half percentage points of the full feature set on both metrics. Features retained in this subset should be inspected against wing venation traits, including loop structure, the number of persistent components, and the scale at which vein components merge under the radial filtration.
 
 The main practical limitation is still sample size. Several families have fewer than ten specimens, so family-level recall should be interpreted as provisional. Image quality, binarization, and connectivity correction also affect the persistence diagrams. Follow-up work should add taxonomic context, literature references, and a biological interpretation of the retained topological summaries.
+
+## Conclusion and future work
+
+We applied two complementary TDA filtrations — Vietoris-Rips on point-cloud samples and a radial sublevel-set filtration on the connected binary image — to classify Diptera families from wing venation. After dropping tail-sensitive moments, each persistence diagram is summarized by 17 statistics, giving a 34-feature representation per specimen. A balanced Random Forest evaluated by repeated stratified 3-fold cross-validation provides the primary classifier, and a direct Wasserstein-distance baseline on Rips diagrams provides an interpretable metric-space comparison.
+
+### Key findings
+
+1. **The two filtrations capture complementary information.** The Vietoris-Rips filtration on point-cloud samples encodes the global loop structure of the wing venation — the number and prominence of wing cells. The radial H0 filtration encodes the center-to-periphery organization of the venation: the order in which vein segments merge as the filtration grows outward from the centroid.
+2. **A compact set of summary statistics is sufficient.** After excluding skewness and kurtosis, the 34 retained features keep the feature-to-sample ratio well below two. The feature-reduction screen identifies an essential subset of 11 features whose 30-repeat pooled accuracy (66.2%) and macro-F1 (65.4%) match the full 34-feature model (67.7% accuracy, 65.9% macro-F1) within roughly one and a half percentage points.
+3. **The Wasserstein baseline is competitive with the Random Forest.** Direct k-nearest-neighbour classification on pairwise Wasserstein distances between Rips H1 diagrams (3-NN on the $W_1$ / $L^\infty$ variant) reaches accuracy 66.8% and macro-F1 63.1% — within a few percentage points of the feature-based Random Forest (67.7% / 65.9%), indicating that the Rips diagrams themselves carry substantial taxonomic signal.
+4. **Repeated stratified cross-validation gives a stable diagnostic view.** With 70 specimens distributed unevenly across nine families, repeating the stratified 3-fold split 30 times and pooling the held-out predictions yields per-family recalls and a confusion matrix that are less dependent on any single partition than a one-off LOOCV would be.
+
+### Limitations
+
+- **Class imbalance and sample size.** The most-represented family has 12 specimens, while several families have only a few; family-level recalls should be read as provisional, and confidence intervals remain wide regardless of method.
+- **Image quality and preprocessing.** The blur level, binarization threshold, and connectivity correction all influence the persistence diagrams. Wings here are manually segmented; an automated segmentation pipeline could introduce different error patterns.
+- **Feature ranking is not an independent performance estimate.** The essential feature subset is selected from the same dataset used for evaluation and is intended for biological interpretation rather than as a held-out performance number.
+
+### Future work
+
+- Extend the dataset with more specimens per family, especially the underrepresented ones, and improve segmentation quality.
+- Investigate which specific topological features correspond to known venation characters in Diptera taxonomy (loop structure, vein-component counts, scale of merging under the radial filtration).
+- Apply extended persistence or zigzag persistence for richer invariants.
+- Re-run the analysis on non-binarized (grayscale) images, where EDT and cubical filtrations would carry information they cannot carry on binary inputs.
+- Explore directional H1 persistence on higher-quality images where loop detection under sweeps may be more reliable than on the present binarized data.
